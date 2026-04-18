@@ -1,0 +1,219 @@
+import mongoose from "mongoose";
+import AppError from "../errors/AppError.js";
+import { Book } from "../model/book.model.js";
+import catchAsync from "../utils/catchAsync.js";
+import sendResponse from "../utils/sendResponse.js";
+
+
+/**
+ * 🟢 Create Book
+ */
+export const createBook = catchAsync(async (req, res) => {
+  const {
+    shopId,
+    title,
+    author,
+    category,
+    price,
+    description,
+    coverImage,
+    stock,
+  } = req.body;
+
+  const book = await Book.create({
+    shopId,
+    title,
+    author,
+    category,
+    price,
+    description,
+    coverImage,
+    stock,
+  });
+
+  return sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: "Book created successfully",
+    data: book,
+  });
+});
+
+/**
+ * 🔵 Get All Books (Search + Filter + Pagination + Sorting)
+ */
+export const getAllBooks = catchAsync(async (req, res) => {
+  const {
+    search,
+    shopId,
+    category,
+    stock,
+    minPrice,
+    maxPrice,
+    page = 1,
+    limit = 10,
+    sortBy = "createdAt",
+    sortOrder = "desc",
+  } = req.query;
+
+  const filter = {};
+
+  // 🔍 Search
+  if (search) {
+    filter.$or = [
+      { title: { $regex: search, $options: "i" } },
+      { author: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  // 🎯 Filters
+  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
+    filter.shopId = shopId;
+  }
+
+  if (category && mongoose.Types.ObjectId.isValid(category)) {
+    filter.category = category;
+  }
+
+  if (stock !== undefined) {
+    filter.stock = stock === "true";
+  }
+
+  // 💰 Price Range
+  if (minPrice || maxPrice) {
+    filter.price = {};
+    if (minPrice) filter.price.$gte = Number(minPrice);
+    if (maxPrice) filter.price.$lte = Number(maxPrice);
+  }
+
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const sortOptions = {
+    [sortBy]: sortOrder === "asc" ? 1 : -1,
+  };
+
+  const [books, total] = await Promise.all([
+    Book.find(filter)
+      .populate("shopId", "name email")
+      .populate("category", "name")
+      .sort(sortOptions)
+      .skip(skip)
+      .limit(Number(limit)),
+
+    Book.countDocuments(filter),
+  ]);
+
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Books fetched successfully",
+   
+    data: {books, meta: {
+      page: Number(page),
+      limit: Number(limit),
+      total,
+      totalPage: Math.ceil(total / limit),
+    },},
+  });
+});
+
+/**
+ * 🟣 Get Single Book
+ */
+export const getSingleBook = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError(400,"Invalid book ID" ));
+  }
+
+  const book = await Book.findById(id)
+    .populate("shopId", "name email")
+    .populate("category", "name");
+
+  if (!book) {
+    return next(new AppError(404,"Book not found"));
+  }
+
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Book fetched successfully",
+    data: book,
+  });
+});
+
+/**
+ * 🟡 Update Book
+ */
+export const updateBook = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  const {
+    shopId,
+    title,
+    author,
+    category,
+    price,
+    description,
+    coverImage,
+    stock,
+  } = req.body;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid book ID", 400));
+  }
+
+  const book = await Book.findByIdAndUpdate(
+    id,
+    {
+      shopId,
+      title,
+      author,
+      category,
+      price,
+      description,
+      coverImage,
+      stock,
+    },
+    {
+      new: true,
+      runValidators: true,
+    }
+  );
+
+  if (!book) {
+    return next(new AppError("Book not found", 404));
+  }
+
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Book updated successfully",
+    data: book,
+  });
+});
+
+/**
+ * 🔴 Delete Book
+ */
+export const deleteBook = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError("Invalid book ID", 400));
+  }
+
+  const book = await Book.findByIdAndDelete(id);
+
+  if (!book) {
+    return next(new AppError("Book not found", 404));
+  }
+
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Book deleted successfully",
+    data: null,
+  });
+});
