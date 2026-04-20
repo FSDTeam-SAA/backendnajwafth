@@ -3,7 +3,7 @@ import { Cart as CartModel } from "../model/cart.model.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
-import { Product } from "../model/product.model.js";
+import { Book } from "../model/book.model.js";
 
 export const addToCart = catchAsync(async (req, res) => {
   const { product, quantity = 1 } = req.body;
@@ -11,7 +11,7 @@ export const addToCart = catchAsync(async (req, res) => {
 
   let cart = await CartModel.findOne({ user });
 
-  const prod = await Product.findById(product);
+  const prod = await Book.findById(product);
   if (!prod || prod.stock < quantity) {
     throw new AppError(httpStatus.BAD_REQUEST, "Product unavailable");
   }
@@ -32,7 +32,7 @@ export const addToCart = catchAsync(async (req, res) => {
   // Recalculate total
   let total = 0;
   for (let item of cart.items) {
-    const p = await Product.findById(item.product);
+    const p = await Book.findById(item.product);
     total += p.price * item.quantity;
   }
   cart.totalAmount = total;
@@ -77,7 +77,7 @@ export const updateCart = catchAsync(async (req, res) => {
   // Recalculate total (similar to add)
   let total = 0;
   for (let item of cart.items) {
-    const p = await Product.findById(item.product);
+    const p = await Book.findById(item.product);
     total += p.price * item.quantity;
   }
   cart.totalAmount = total;

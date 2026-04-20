@@ -3,10 +3,10 @@ import AppError from "../errors/AppError.js";
 import { Notification } from "../model/notification.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
-import {
-  emitNotificationAllRead,
-  emitNotificationRead,
-} from "../utils/notification.js";
+// import {
+//   emitNotificationAllRead,
+//   emitNotificationRead,
+// } from "../utils/notification.js";
 
 const buildNotificationQuery = (req) => {
   const query = { user: req.user._id };
@@ -94,7 +94,7 @@ export const markNotificationAsRead = catchAsync(async (req, res) => {
     notification.isRead = true;
     notification.readAt = new Date();
     await notification.save();
-    await emitNotificationRead(notification);
+    // await emitNotificationRead(notification);
   }
 
   sendResponse(res, {
@@ -121,7 +121,7 @@ export const markAllNotificationsAsRead = catchAsync(async (req, res) => {
     },
   );
 
-  await emitNotificationAllRead(req.user._id);
+  // await emitNotificationAllRead(req.user._id);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,

@@ -4,11 +4,8 @@ import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { nanoid } from "nanoid";
-import { Product } from "../model/product.model.js";
-import {
-  createNotification,
-  getUserDisplayName,
-} from "../utils/notification.js";
+
+import { Book } from "../model/book.model.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
@@ -19,9 +16,9 @@ export const createOrder = catchAsync(async (req, res) => {
   let totalAmount = 0;
   const orderItems = [];
   for (let item of items) {
-    const product = await Product.findById(item.product.toString());
-
-    if (!product || product.stock < item.quantity) {
+    
+    const product = await Book.findById(item.product.toString());
+    if (!product || ! product.stock) {
       throw new AppError(
         httpStatus.BAD_REQUEST,
         `Insufficient stock for ${product?.title}`,
@@ -32,7 +29,7 @@ export const createOrder = catchAsync(async (req, res) => {
       product: item.product,
       quantity: item.quantity,
       price: product.price,
-      vendor: product.vendor,
+      vendor: product.shopId,
     });
 
     // Update stock
@@ -47,7 +44,7 @@ export const createOrder = catchAsync(async (req, res) => {
     items: orderItems,
     totalAmount,
     customer,
-    vendor: orderItems[0].vendor,
+    vendor: orderItems[0].shopId,
     address,
     expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });

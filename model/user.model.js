@@ -1,159 +1,87 @@
-import mongoose, { Schema } from "mongoose";
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
-const otpSchema = new Schema(
+const userSchema = new mongoose.Schema(
   {
-    hash: {
+    name: { type: String },
+    email: { type: String },
+    userId: { type: String, unique: true, sparse: true, trim: true },
+    password: { type: String, select: 0 },
+    username: { type: String },
+    phone: { type: String },
+    bio: { type: String, default: "" },
+    credit: { type: Number, default: null },
+    dob: { type: Date },
+    gender: {
       type: String,
-      default: "",
-      select: false,
+      enum: ["male", "female", "other"],
     },
-    expiresAt: {
-      type: Date,
-      default: null,
-      select: false,
-    },
-    attempts: {
-      type: Number,
-      default: 0,
-      select: false,
-    },
-    lastSentAt: {
-      type: Date,
-      default: null,
-      select: false,
-    },
-    purpose: {
-      type: String,
-      enum: ["RESET_PASSWORD", ""],
-      default: "",
-      select: false,
-    },
-  },
-  { _id: false }
-);
-
-const userSchema = new Schema(
-  {
-    fullName: {
-      type: String,
-      trim: true,
-      required: [true, "Full name is required"],
-      maxlength: [100, "Full name cannot exceed 100 characters"],
-    },
-
-    email: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      unique: true,
-      required: [true, "Email is required"],
-      index: true,
-      match: [/^\S+@\S+\.\S+$/, "Please provide a valid email address"],
-    },
-
-    phone: {
-      type: String,
-      trim: true,
-      required: [true, "Phone number is required"],
-      maxlength: [20, "Phone number cannot exceed 20 characters"],
-    },
-
     role: {
       type: String,
-      enum: ["buyer", "driver", "admin"],
-      default: "buyer",
-      required: true,
+      default: "user",
+      enum: ["user", "admin"],
     },
-
-    authProvider: {
-      type: String,
-      enum: ["LOCAL", "GOOGLE"],
-      default: "LOCAL",
-    },
-
-    googleId: {
-      type: String,
-      default: null,
-      index: true,
-    },
-
-    password: {
-      type: String,
-      minlength: [6, "Password must be at least 6 characters"],
-      required: function () {
-        return this.authProvider === "LOCAL";
-      },
-      select: false,
-    },
-
-    isEmailVerified: {
-      type: Boolean,
-      default: true,
-    },
-
-    isBlocked: {
-      type: Boolean,
-      default: false,
-    },
-
-    refreshTokenHash: {
-      type: String,
-      default: "",
-      select: false,
-    },
-
     avatar: {
-      public_id: {
-        type: String,
-        default: "",
-      },
-      url: {
-        type: String,
-        default: "",
-      },
+      public_id: { type: String, default: "" },
+      url: { type: String, default: "" },
     },
-
-    otp: {
-      type: otpSchema,
-      default: () => ({}),
+    enableNotifications: { type: Boolean, default: true },
+    dnd: { type: Boolean, default: false },
+    lastPost: { type: Date },
+    totalPosts: { type: Number, default: 0 },
+    address: {
+      type: String,
     },
+    location: {
+      latitude: { type: Number },
+      longitude: { type: Number },
+    },
+    defaultRadius: {
+      type: Number,
+      default: 100,
+      min: 0,
+    },
+    verificationInfo: {
+      verified: { type: Boolean, default: false },
+      token: { type: String, default: "" },
+    },
+    password_reset_token: { type: String, default: "" },
+    fine: { type: Number, default: 0 },
+    refreshToken: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
+// Pre save middleware: Hash password
 userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  if (!this.password) return next();
+  const user = this;
 
-  const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
-  this.password = await bcrypt.hash(this.password, saltRounds);
+  if (user.isModified("password")) {
+    const saltRounds = Number(process.env.bcrypt_salt_round) || 10;
+    user.password = await bcrypt.hash(user.password, saltRounds);
+  }
+
   next();
 });
 
-userSchema.methods.isPasswordMatched = async function (enteredPassword) {
-  if (!this.password) return false;
-  return bcrypt.compare(enteredPassword, this.password);
+userSchema.statics.isUserExistsByEmail = async function (email) {
+  return await User.findOne({ email }).select("+password");
 };
 
-userSchema.methods.isOtpValid = async function (enteredOtp) {
-  if (!this.otp?.hash || !this.otp?.expiresAt) return false;
-  if (this.otp.expiresAt < new Date()) return false;
-  return bcrypt.compare(String(enteredOtp), this.otp.hash);
+userSchema.statics.isUserExistsByUserId = async function (userId) {
+  return await User.findOne({ userId }).select("+password");
 };
 
-userSchema.methods.setRefreshToken = async function (token) {
-  const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
-  this.refreshTokenHash = await bcrypt.hash(token, saltRounds);
+userSchema.statics.isOTPVerified = async function (id) {
+  const user = await User.findById(id).select("+verificationInfo");
+  return user?.verificationInfo.verified;
 };
 
-userSchema.methods.isRefreshTokenValid = async function (token) {
-  if (!this.refreshTokenHash) return false;
-  return bcrypt.compare(token, this.refreshTokenHash);
-};
-
-userSchema.methods.clearRefreshToken = async function () {
-  this.refreshTokenHash = "";
+userSchema.statics.isPasswordMatched = async function (
+  plainTextPassword,
+  hashPassword
+) {
+  return await bcrypt.compare(plainTextPassword, hashPassword);
 };
 
 export const User = mongoose.model("User", userSchema);

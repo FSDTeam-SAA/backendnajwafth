@@ -5,26 +5,11 @@ import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 
-const sanitizeUser = (user) => ({
-  _id: user._id,
-  fullName: user.fullName,
-  email: user.email,
-  phone: user.phone,
-  role: user.role,
-  authProvider: user.authProvider,
-  googleId: user.googleId,
-  isEmailVerified: user.isEmailVerified,
-  isBlocked: user.isBlocked,
-  avatar: user.avatar,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
-});
-
+// Get user profile
 export const getProfile = catchAsync(async (req, res) => {
   const user = await User.findById(req.user._id).select(
-    "-password -refreshTokenHash -otp.hash -otp.expiresAt -otp.attempts -otp.lastSentAt -otp.purpose"
+    "-password -refreshToken -verificationInfo -password_reset_token",
   );
-
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
@@ -33,31 +18,40 @@ export const getProfile = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Profile fetched successfully",
-    data: sanitizeUser(user),
+    data: user,
   });
 });
 
+// Update profile
 export const updateProfile = catchAsync(async (req, res) => {
-  const { fullName } = req.body;
+  const { name, phone, bio, gender, dob, age, address } = req.body;
 
-  const user = await User.findById(req.user._id);
+  const userId = req.user._id;
+
+  // Find user
+  const user = await User.findById(userId).select(
+    "-password -refreshToken -verificationInfo -password_reset_token",
+  );
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
 
-  if (fullName !== undefined) {
-    if (!fullName.trim()) {
-      throw new AppError(httpStatus.BAD_REQUEST, "Full name is required");
-    }
-    user.fullName = fullName.trim();
-  }
+  // Update only provided fields
+  if (name !== undefined) user.name = name;
+  if (phone !== undefined) user.phone = phone;
+  if (bio !== undefined) user.bio = bio;
+  if (gender !== undefined) user.gender = gender;
+  if (dob !== undefined) user.dob = dob;
+  if (age !== undefined) user.age = age;
+  if (address !== undefined) user.address = address;
 
   if (req.file) {
-    const upload = await uploadOnCloudinary(req.file.buffer);
-    user.avatar = {
-      public_id: upload.public_id,
-      url: upload.secure_url,
-    };
+    const result = await uploadOnCloudinary(req.file.buffer);
+    if (!user.avatar) {
+      user.avatar = { public_id: "", url: "" };
+    }
+    user.avatar.public_id = result.public_id;
+    user.avatar.url = result.secure_url;
   }
 
   await user.save();
@@ -66,44 +60,29 @@ export const updateProfile = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Profile updated successfully",
-    data: sanitizeUser(user),
+    data: user,
   });
 });
 
+// Change user password
 export const changePassword = catchAsync(async (req, res) => {
   const { currentPassword, newPassword, confirmPassword } = req.body;
-
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Current password, new password and confirm password are required"
-    );
-  }
-
-  if (newPassword !== confirmPassword) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "New password and confirm password do not match"
-    );
-  }
-
-  if (currentPassword === newPassword) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "New password must be different from current password"
-    );
-  }
-
   const user = await User.findById(req.user._id).select("+password");
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
 
-  const isMatched = await user.isPasswordMatched(currentPassword);
-  if (!isMatched) {
+  if (newPassword !== confirmPassword) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "New password and confirm password do not match",
+    );
+  }
+
+  if (!(await User.isPasswordMatched(currentPassword, user.password))) {
     throw new AppError(
       httpStatus.UNAUTHORIZED,
-      "Current password is incorrect"
+      "Current password is incorrect",
     );
   }
 
@@ -114,6 +93,22 @@ export const changePassword = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Password changed successfully",
+    data: user,
+  });
+});
+
+export const deleteOwnAccount = catchAsync(async (req, res) => {
+  const userId = req.user._id;
+
+  const user = await User.findByIdAndDelete(userId);
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Account and all associated data deleted successfully",
     data: null,
   });
 });
