@@ -3,10 +3,11 @@ import {
   register,
   login,
   forgetPassword,
-  verifyOTP,
+  // verifyOTP,
   resetPassword,
   refreshToken,
   logout,
+  verifyOTPForReset,
 } from "../controller/auth.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 
@@ -22,7 +23,7 @@ router.post("/login", login);
 router.post("/forgot-password", forgetPassword);
 
 // Verify OTP
-router.post("/verify-otp", verifyOTP);
+router.post("/verify-otp", verifyOTPForReset);
 
 // Reset new password
 router.post("/reset-password", resetPassword);

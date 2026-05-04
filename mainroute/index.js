@@ -8,7 +8,7 @@ import cartRoute from "../route/cart.route.js";
 import couponRoute from "../route/coupon.route.js";
 import notificationRoute from "../route/notification.route.js";
 import orderRoute from "../route/order.route.js";
-// import categoryRoute from "../route/product.category.route.js";
+import categoryRoute from "../route/product.category.route.js";
 import shopRoute from "../route/shop.route.js";
 import wishlistRoute from "../route/wishlist.route.js";
 
@@ -22,7 +22,7 @@ router.use("/cart", cartRoute);
 router.use("/coupon", couponRoute);
 router.use("/notification", notificationRoute);
 router.use("/order", orderRoute);
-// router.use("/category", categoryRoute);
+router.use("/category", categoryRoute);
 router.use("/shop", shopRoute);
 router.use("/wishlist", wishlistRoute);
 

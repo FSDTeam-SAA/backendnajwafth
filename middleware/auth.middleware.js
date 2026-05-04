@@ -27,9 +27,9 @@ export const protect = catchAsync(async (req, res, next) => {
     throw new AppError(httpStatus.FORBIDDEN, "User is blocked");
   }
 
-  if (!user.isEmailVerified) {
-    throw new AppError(httpStatus.FORBIDDEN, "User not verified");
-  }
+  // if (!user.isEmailVerified) {
+  //   throw new AppError(httpStatus.FORBIDDEN, "User not verified");
+  // }
 
   req.user = user;
   next();

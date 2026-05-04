@@ -4,7 +4,7 @@ import { uploadOnCloudinary } from "../utils/commonMethod.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import AppError from "../errors/AppError.js";
-import { Product } from "../model/product.model.js";
+import { Book } from "../model/book.model.js";
 
 export const addCategory = catchAsync(async (req, res) => {
   const { name, parent, color } = req.body;
@@ -65,11 +65,11 @@ export const getCategories = catchAsync(async (req, res) => {
   if (includeProducts === "true") {
     const categoriesWithCounts = await Promise.all(
       categories.map(async (category) => {
-        const productCount = await Product.countDocuments({
+        const productCount = await Book.countDocuments({
           category: category._id,
         });
 
-        const associatedProducts = await Product.find({
+        const associatedProducts = await Book.find({
           category: category._id,
         }).populate("category", "name path").populate("vendor", "name");
         return {
@@ -156,7 +156,7 @@ export const deleteCategory = catchAsync(async (req, res) => {
   }
 
   // Check if category has products
-  const productCount = await Product.countDocuments({ category: category._id });
+  const productCount = await Book.countDocuments({ category: category._id });
   if (productCount > 0) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
@@ -199,10 +199,10 @@ export const getCategoryTree = catchAsync(async (req, res) => {
     const tree = await Promise.all(
       categories.map(async (category) => {
         const children = await buildTree(category._id);
-        const productCount = await Product.countDocuments({
+        const productCount = await Book.countDocuments({
           category: category._id,
         });
-        const associatedProducts = await Product.find({
+        const associatedProducts = await Book.find({
           category: category._id,
         }).populate("category", "name path").populate("vendor", "name").populate("shopId", "name description shopStatus");
 

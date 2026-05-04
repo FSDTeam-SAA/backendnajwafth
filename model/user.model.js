@@ -18,8 +18,8 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      default: "user",
-      enum: ["user", "admin"],
+      default: "buyer",
+      enum: ["buyer", "admin","seller", "driver"],
     },
     avatar: {
       public_id: { type: String, default: "" },
@@ -60,8 +60,6 @@ userSchema.pre("save", async function (next) {
     const saltRounds = Number(process.env.bcrypt_salt_round) || 10;
     user.password = await bcrypt.hash(user.password, saltRounds);
   }
-
-  next();
 });
 
 userSchema.statics.isUserExistsByEmail = async function (email) {

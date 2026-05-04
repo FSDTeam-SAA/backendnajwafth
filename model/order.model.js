@@ -3,7 +3,7 @@ import mongoose, { Schema } from "mongoose";
 const orderItemSchema = new Schema({
   product: {
     type: Schema.Types.ObjectId,
-    ref: "Product",
+    ref: "Book",
     required: true,
   },
   quantity: {
@@ -56,8 +56,7 @@ const orderSchema = new Schema(
     },
     vendor: {
       type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
+      ref: "User"
     },
     address: {
       type: String,

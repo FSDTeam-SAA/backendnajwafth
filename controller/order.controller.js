@@ -6,6 +6,7 @@ import catchAsync from "../utils/catchAsync.js";
 import { nanoid } from "nanoid";
 
 import { Book } from "../model/book.model.js";
+import { createNotification, getUserDisplayName } from "../utils/notification.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
@@ -19,6 +20,7 @@ export const createOrder = catchAsync(async (req, res) => {
     
     const product = await Book.findById(item.product.toString());
     if (!product || ! product.stock) {
+      console.log("Product not found or out of stock:", product);
       throw new AppError(
         httpStatus.BAD_REQUEST,
         `Insufficient stock for ${product?.title}`,
@@ -31,20 +33,17 @@ export const createOrder = catchAsync(async (req, res) => {
       price: product.price,
       vendor: product.shopId,
     });
-
-    // Update stock
-    product.stock -= item.quantity;
-    await product.save();
   }
 
   const orderId = `ORD${nanoid(6)}`;
+  console.log("Creating order with ID:", orderItems, "for customer:", customer);
 
   const order = await OrderModel.create({
     orderId,
     items: orderItems,
     totalAmount,
     customer,
-    vendor: orderItems[0].shopId,
+    vendor: orderItems[0].vendor,
     address,
     expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
@@ -229,7 +228,7 @@ export const getMyOrders = catchAsync(async (req, res) => {
   const skip = (pageNum - 1) * limitNum;
   const filter = {
     customer: req.user._id,
-    status: { $in: ["in_progress", "shipped", "delivered"] },
+    status: { $in: ["pending", "in_progress", "shipped", "delivered"] },
   };
 
   const [orders, total] = await Promise.all([
