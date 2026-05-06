@@ -12,7 +12,7 @@ export const addToCart = catchAsync(async (req, res) => {
   let cart = await CartModel.findOne({ user });
 
   const prod = await Book.findById(product);
-  if (!prod || prod.stock < quantity) {
+  if (!prod || !prod.stock ) {
     throw new AppError(httpStatus.BAD_REQUEST, "Product unavailable");
   }
 
