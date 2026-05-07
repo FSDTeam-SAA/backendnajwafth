@@ -65,6 +65,10 @@ const orderSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Coupon",
     },
+    driver:{
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    }
   },
   { timestamps: true },
 );

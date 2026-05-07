@@ -141,10 +141,10 @@ export const getOrderById = catchAsync(async (req, res) => {
 });
 
 export const updateOrderStatus = catchAsync(async (req, res) => {
-  if (req.user.role !== "seller" && req.user.role !== "admin") {
+  if (req.user.role !== "driver" && req.user.role !== "admin" ) {
     throw new AppError(
       httpStatus.FORBIDDEN,
-      "Only managers/admins can update status",
+      "Only driver/admins can update status",
     );
   }
 

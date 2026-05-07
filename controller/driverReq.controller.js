@@ -3,6 +3,7 @@ import AppError from "../errors/AppError.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
 import { DriverRequest } from "../model/driveReq.model.js";
+import { Order } from "../model/order.model.js";
 
 
 /**
@@ -223,3 +224,80 @@ export const deleteDriverRequest = catchAsync(async (req, res, next) => {
     data: null,
   });
 });
+
+
+export const assignDriverToRequest = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { driverId } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(driverId)) {
+    return next(new AppError(400, "Invalid request ID or driver ID"));
+  }
+
+  const request = await DriverRequest.findByIdAndUpdate(
+    id,
+    { driver: driverId },
+    { new: true }
+  );
+  if (!request) {
+    return next(new AppError(404, "Driver request not found"));
+  }
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Driver assigned to request successfully",
+    data: request,
+  });
+});
+
+
+export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return next(new AppError(400, "Invalid request ID"));
+  }
+  if (!["pending", "accepted", "rejected"].includes(status)) {
+    return next(new AppError(400, "Invalid status value"));
+  }
+  if (status === "accepted") {
+    const order = await Order.findById(request.orderId);
+    if (order) {
+      order.driver = request.driver;
+      await order.save();
+    }
+  }
+  const request = await DriverRequest.findByIdAndUpdate(
+    id,
+    { status },
+    { new: true }
+  );
+  if (!request) {
+    return next(new AppError(404, "Driver request not found"));
+  }
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Driver request status updated successfully",
+    data: request,
+  }); 
+});
+
+export const getDriverRequestsByDriver = catchAsync(async (req, res, next) => {
+  const { driverId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(driverId)) {
+    return next(new AppError(400, "Invalid driver ID"));
+  }
+  const requests = await DriverRequest.find({ driver: driverId })
+    .populate("shopId", "name email")
+    .populate("orderId")
+    .sort({ createdAt: -1 });
+  return sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: "Driver requests for driver fetched successfully",
+    data: requests,
+  });
+});
+
+
+
