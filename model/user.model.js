@@ -53,7 +53,7 @@ const userSchema = new mongoose.Schema(
 );
 
 // Pre save middleware: Hash password
-userSchema.pre("save", async function (next) {
+userSchema.pre("save", async function () {
   const user = this;
 
   if (user.isModified("password")) {

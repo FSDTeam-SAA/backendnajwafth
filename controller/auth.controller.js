@@ -7,11 +7,34 @@ import sendResponse from "../utils/sendResponse.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import { User } from "./../model/user.model.js";
 
-export const register = catchAsync(async (req, res) => {
-  const { name, email, password, confirmPassword, role } = req.body;
+const buildAuthResponseData = (user, accessToken, refreshToken) => {
+  const userObj = user.toObject();
 
-  if (!email || !password) {
+  delete userObj.password;
+  delete userObj.refreshToken;
+  delete userObj.password_reset_token;
+
+  return {
+    accessToken,
+    refreshToken,
+    role: user.role,
+    _id: user._id,
+    user: userObj,
+  };
+};
+
+export const register = catchAsync(async (req, res) => {
+  const { name, email, phone, password, confirmPassword, role } = req.body;
+
+  if (!name || !email || !password) {
     throw new AppError(httpStatus.FORBIDDEN, "Please fill in all fields");
+  }
+
+  if (confirmPassword && password !== confirmPassword) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      "Password and confirm password do not match"
+    );
   }
 
   const checkUser = await User.findOne({ email: email });
@@ -24,6 +47,7 @@ export const register = catchAsync(async (req, res) => {
   const user = await User.create({
     name,
     email,
+    phone,
     password,
     role,
     verificationInfo: { token: "", verified: true },
@@ -47,16 +71,12 @@ export const register = catchAsync(async (req, res) => {
   );
   user.refreshToken = refreshToken;
   await user.save();
-  user.accessToken = accessToken;
-
-  const userObj = user.toObject();
-  userObj.accessToken = accessToken;
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "User registered successfully",
-    data: userObj,
+    data: buildAuthResponseData(user, accessToken, refreshToken),
   });
 });
 
@@ -112,7 +132,7 @@ export const login = catchAsync(async (req, res) => {
   );
 
   user.refreshToken = refreshToken;
-  let _user = await user.save();
+  await user.save();
 
   res.cookie("refreshToken", refreshToken, {
     secure: true,
@@ -125,13 +145,7 @@ export const login = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "User Logged in successfully",
-    data: {
-      accessToken,
-      refreshToken: refreshToken,
-      role: user.role,
-      _id: user._id,
-      user: user,
-    },
+    data: buildAuthResponseData(user, accessToken, refreshToken),
   });
 });
 
@@ -212,6 +226,7 @@ export const resetPassword = catchAsync(async (req, res) => {
     throw new AppError(httpStatus.BAD_REQUEST, "Invalid OTP");
   }
   user.password = password;
+  user.password_reset_token = "";
   await user.save();
   sendResponse(res, {
     statusCode: httpStatus.OK,
