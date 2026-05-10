@@ -11,6 +11,7 @@ import orderRoute from "../route/order.route.js";
 import categoryRoute from "../route/product.category.route.js";
 import shopRoute from "../route/shop.route.js";
 import wishlistRoute from "../route/wishlist.route.js";
+import dashboardRoute from "../route/dashboard.route.js";
 
 const router = express.Router();
 
@@ -25,5 +26,6 @@ router.use("/order", orderRoute);
 router.use("/category", categoryRoute);
 router.use("/shop", shopRoute);
 router.use("/wishlist", wishlistRoute);
+router.use("/dashboard", dashboardRoute);
 
 export default router;

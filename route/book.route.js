@@ -8,7 +8,7 @@ const router = express.Router();
 router.post("/add", protect, createBook);
 router.get("/", protect, getAllBooks); 
 router.get("/:id", protect, getSingleBook); 
-router.put("/update", protect, updateBook);
-router.delete("/clear", protect, deleteBook);
+router.put("/:id", protect, updateBook);
+router.delete("/:id", protect, deleteBook);
 
 export default router;
