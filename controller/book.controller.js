@@ -4,6 +4,7 @@ import { Book } from "../model/book.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
 import { uploadOnCloudinary } from "../utils/commonMethod.js";
+import { Review } from "../model/review.model.js";
 
 async function resolveCoverImage(req) {
   if (req.file) {
@@ -52,11 +53,16 @@ export const getAllBooks = catchAsync(async (req, res) => {
     limit = 10,
     sortBy = "createdAt",
     sortOrder = "desc",
+    shopId,
   } = req.query;
 
   const filter = {
-    shopId: req.user._id,
+    // shopId: req.user._id,
   };
+
+  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
+    filter.shopId = shopId;
+  }
 
   if (search) {
     filter.$or = [
@@ -98,14 +104,22 @@ export const getAllBooks = catchAsync(async (req, res) => {
   ]);
 
   //need to here add each book review and rating 
-    for (let book of books) {
-    const reviews = await Review.find({ book: book._id }).populate("user", "name");
+let book = await Promise.all(
+  books.map(async (book) => {
+    const reviews = await Review.find({ book: book._id })
+      .populate("user", "name");
+
     const avgRating =
       reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length || 0;
-    book = book.toObject();
-    book.reviews = reviews;
-    book.avgRating = avgRating.toFixed(1);
-  }
+
+    const bookObj = book.toObject();
+
+    bookObj.reviews = reviews;
+    bookObj.avgRating = Number(avgRating.toFixed(1));
+
+    return bookObj;
+  })
+);
 
 
   return sendResponse(res, {
@@ -113,7 +127,7 @@ export const getAllBooks = catchAsync(async (req, res) => {
     success: true,
     message: "Books fetched successfully",
     data: {
-      books,
+      books: book,
       meta: {
         page: Number(page),
         limit: Number(limit),

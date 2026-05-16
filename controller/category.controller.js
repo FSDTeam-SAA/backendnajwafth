@@ -71,7 +71,7 @@ export const getCategories = catchAsync(async (req, res) => {
 
         const associatedProducts = await Book.find({
           category: category._id,
-        }).populate("category", "name path").populate("vendor", "name");
+        }).populate("category", "name path").populate("shopId", "name");
         return {
           ...category.toObject(),
           associatedProducts,
