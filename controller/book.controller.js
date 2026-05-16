@@ -92,6 +92,9 @@ export const getAllBooks = catchAsync(async (req, res) => {
     [sortBy]: sortOrder === "asc" ? 1 : -1,
   };
 
+
+  
+
   const [books, total] = await Promise.all([
     Book.find(filter)
       .populate("shopId", "name email")
@@ -102,6 +105,17 @@ export const getAllBooks = catchAsync(async (req, res) => {
 
     Book.countDocuments(filter),
   ]);
+
+  //need to here add each book review and rating 
+    for (let book of books) {
+    const reviews = await Review.find({ book: book._id }).populate("user", "name");
+    const avgRating =
+      reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length || 0;
+    book = book.toObject();
+    book.reviews = reviews;
+    book.avgRating = avgRating.toFixed(1);
+  }
+
 
   return sendResponse(res, {
     statusCode: 200,
