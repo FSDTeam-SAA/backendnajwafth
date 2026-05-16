@@ -11,29 +11,45 @@ import { Order } from "../model/order.model.js";
  */
 export const createDriverRequest = catchAsync(async (req, res) => {
   const {
-    shopId,
     shopName,
+    shopPhone,
     phone,
     orderDate,
     totalAmount,
     customerName,
+    totalItems,
     item,
     location,
+    customerLocation,
     orderId,
     price,
     message,
   } = req.body;
 
+  let resolvedOrderId;
+  if (typeof orderId === "string" && orderId.trim()) {
+    const order = await Order.findOne({
+      orderId: orderId.trim(),
+      vendor: req.user._id,
+    });
+
+    if (!order) {
+      throw new AppError(404, "Order not found for this seller");
+    }
+
+    resolvedOrderId = order._id;
+  }
+
   const driverRequest = await DriverRequest.create({
-    shopId,
+    shopId: req.user._id,
     shopName,
-    phone,
+    phone: shopPhone || phone,
     orderDate,
     totalAmount,
     customerName,
-    item,
-    location,
-    orderId,
+    item: item || totalItems,
+    location: customerLocation || location,
+    orderId: resolvedOrderId,
     price,
     message,
   });
@@ -63,7 +79,9 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
 
   const filter = {};
 
-  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
+  if (req.user.role === "seller") {
+    filter.shopId = req.user._id;
+  } else if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
     filter.shopId = shopId;
   }
 
@@ -105,6 +123,13 @@ export const getShopDriverRequests = catchAsync(async (req, res, next) => {
     return next(new AppError(400, "Invalid shop ID"));
   }
 
+  if (
+    req.user.role === "seller" &&
+    req.user._id.toString() !== shopId
+  ) {
+    return next(new AppError(403, "Access denied"));
+  }
+
   const requests = await DriverRequest.find({ shopId })
     .populate("orderId")
     .sort({ createdAt: -1 });
@@ -136,6 +161,13 @@ export const getSingleDriverRequest = catchAsync(async (req, res, next) => {
     return next(new AppError(404, "Driver request not found"));
   }
 
+  if (
+    req.user.role === "seller" &&
+    request.shopId?._id?.toString() !== req.user._id.toString()
+  ) {
+    return next(new AppError(403, "Access denied"));
+  }
+
   return sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -157,8 +189,10 @@ export const updateDriverRequest = catchAsync(async (req, res, next) => {
     orderDate,
     totalAmount,
     customerName,
+    totalItems,
     item,
     location,
+    customerLocation,
     orderId,
     price,
     message,
@@ -168,16 +202,21 @@ export const updateDriverRequest = catchAsync(async (req, res, next) => {
     return next(new AppError(400, "Invalid request ID"));
   }
 
-  const request = await DriverRequest.findByIdAndUpdate(
-    id,
+  const filter =
+    req.user.role === "seller"
+      ? { _id: id, shopId: req.user._id }
+      : { _id: id };
+
+  const request = await DriverRequest.findOneAndUpdate(
+    filter,
     {
       shopName,
       phone,
       orderDate,
       totalAmount,
       customerName,
-      item,
-      location,
+      item: item || totalItems,
+      location: customerLocation || location,
       orderId,
       price,
       message,
@@ -211,7 +250,12 @@ export const deleteDriverRequest = catchAsync(async (req, res, next) => {
     return next(new AppError(400, "Invalid request ID"));
   }
 
-  const request = await DriverRequest.findByIdAndDelete(id);
+  const filter =
+    req.user.role === "seller"
+      ? { _id: id, shopId: req.user._id }
+      : { _id: id };
+
+  const request = await DriverRequest.findOneAndDelete(filter);
 
   if (!request) {
     return next(new AppError(404, "Driver request not found"));

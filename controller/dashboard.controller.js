@@ -38,21 +38,50 @@ const buildWeeklyRevenue = (orders = []) => {
   }));
 };
 
+const buildTopSellingBooks = (orders = []) => {
+  const bookMap = new Map();
+
+  for (const order of orders) {
+    for (const item of order.items || []) {
+      const product = item.product;
+      const productId = product?._id?.toString?.() || product?.toString?.();
+      if (!productId) continue;
+
+      const current = bookMap.get(productId) || {
+        _id: productId,
+        title: product?.title,
+        author: product?.author,
+        price: product?.price,
+        coverImage: product?.coverImage,
+        category: product?.category,
+        soldCount: 0,
+      };
+
+      current.soldCount += item.quantity || 0;
+      bookMap.set(productId, current);
+    }
+  }
+
+  return Array.from(bookMap.values())
+    .sort((a, b) => b.soldCount - a.soldCount)
+    .slice(0, 10);
+};
+
 export const getSellerOverview = catchAsync(async (req, res) => {
   const sellerId = req.user._id;
-  const [bookCount, allSellerOrders, completedOrders, recentOrders, recentBooks] = await Promise.all([
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const [bookCount, allSellerOrders, completedOrders, recentOrders] = await Promise.all([
     Book.countDocuments({ shopId: sellerId }),
     Order.find({ vendor: sellerId })
       .populate("customer", "name email phone avatar")
+      .populate("items.product", "title author price coverImage category")
       .sort({ createdAt: -1 }),
     Order.find({ vendor: sellerId, status: "delivered" }),
     Order.find({ vendor: sellerId })
       .populate("customer", "name email phone avatar")
-      .populate("items.product", "title coverImage")
-      .sort({ createdAt: -1 })
-      .limit(8),
-    Book.find({ shopId: sellerId })
-      .populate("category", "name")
+      .populate("items.product", "title author price coverImage category")
       .sort({ createdAt: -1 })
       .limit(8),
   ]);
@@ -61,9 +90,13 @@ export const getSellerOverview = catchAsync(async (req, res) => {
     (sum, order) => sum + (order.totalAmount || 0),
     0,
   );
+  const ordersToday = allSellerOrders.filter(
+    (order) => new Date(order.createdAt) >= startOfToday,
+  ).length;
   const totalCustomers = new Set(
     allSellerOrders.map((order) => order.customer?._id?.toString()).filter(Boolean),
   ).size;
+  const topBooks = buildTopSellingBooks(allSellerOrders);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -73,13 +106,14 @@ export const getSellerOverview = catchAsync(async (req, res) => {
       metrics: {
         totalBooks: bookCount,
         totalOrders: allSellerOrders.length,
+        ordersToday,
         totalUsers: totalCustomers,
         totalCompletedOrders: completedOrders.length,
         totalRevenue: Number(totalRevenue.toFixed(2)),
       },
       salesAnalysis: buildWeeklyRevenue(allSellerOrders),
       recentOrders,
-      recentBooks,
+      topBooks,
     },
   });
 });

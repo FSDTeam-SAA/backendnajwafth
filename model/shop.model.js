@@ -20,6 +20,9 @@ const shopSchema = new Schema({
   address: {
     type: String,
   },
+  deliveryArea: {
+    type: String,
+  },
   products: [
     {
       type: Schema.Types.ObjectId,

@@ -85,6 +85,8 @@ export const createOrder = catchAsync(async (req, res) => {
 
 export const getOrders = catchAsync(async (req, res) => {
   const { status, page = 1, limit = 10 } = req.query;
+  const pageNum = Number(page);
+  const limitNum = Number(limit);
   const query = { customer: req.user._id };
   if (status) query.status = status;
 
@@ -95,26 +97,37 @@ export const getOrders = catchAsync(async (req, res) => {
     delete query.customer;
   }
 
-  const orders = await OrderModel.find(query)
-    .populate("items.product", "title price photos rating")
-    .populate("customer", "name email")
-    .populate("vendor", "name storeName")
-    .limit(limit * 1)
-    .skip((page - 1) * limit)
-    .sort({ createdAt: -1 });
+  const [orders, total] = await Promise.all([
+    OrderModel.find(query)
+      .populate("items.product", "title price photos rating")
+      .populate("customer", "name email phone")
+      .populate("vendor", "name storeName")
+      .limit(limitNum)
+      .skip((pageNum - 1) * limitNum)
+      .sort({ createdAt: -1 }),
+    OrderModel.countDocuments(query),
+  ]);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Orders fetched",
-    data: orders,
+    data: {
+      orders,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    },
   });
 });
 
 export const getOrderById = catchAsync(async (req, res) => {
   const order = await OrderModel.findOne({ orderId: req.params.orderId })
     .populate("items.product", "title price photos")
-    .populate("customer", "name email")
+    .populate("customer", "name email phone")
     .populate("vendor", "name storeName");
 
   if (!order) throw new AppError(httpStatus.NOT_FOUND, "Order not found");
@@ -141,10 +154,10 @@ export const getOrderById = catchAsync(async (req, res) => {
 });
 
 export const updateOrderStatus = catchAsync(async (req, res) => {
-  if (req.user.role !== "driver" && req.user.role !== "admin" ) {
+  if (req.user.role !== "driver" && req.user.role !== "admin" && req.user.role !== "seller") {
     throw new AppError(
       httpStatus.FORBIDDEN,
-      "Only driver/admins can update status",
+      "Only seller, driver, or admin can update status",
     );
   }
 

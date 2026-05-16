@@ -6,11 +6,12 @@ import catchAsync from "../utils/catchAsync.js";
 import { Shop } from "../model/shop.model.js";
 
 const applyShopUpdates = async (shop, req) => {
-  const { name, description, address } = req.body;
+  const { name, description, address, deliveryArea } = req.body;
 
   if (name) shop.name = name;
   if (description) shop.description = description;
   if (address) shop.address = address;
+  if (deliveryArea !== undefined) shop.deliveryArea = deliveryArea;
 
   const banner = {};
   const certificate = {};
