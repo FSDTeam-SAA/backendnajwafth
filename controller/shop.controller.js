@@ -3,6 +3,7 @@ import { uploadOnCloudinary } from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
+import { Order } from "../model/order.model.js";
 import { Shop } from "../model/shop.model.js";
 import { User } from "../model/user.model.js";
 
@@ -70,9 +71,25 @@ export const getShops = catchAsync(async (req, res) => {
     "owner",
     "name email phone avatar address username",
   );
+  const orderCounts = await Order.aggregate([
+    {
+      $match: {
+        vendor: { $in: sellerIds },
+      },
+    },
+    {
+      $group: {
+        _id: "$vendor",
+        totalOrders: { $sum: 1 },
+      },
+    },
+  ]);
 
   const shopByOwner = new Map(
     shopDocs.map((shop) => [shop.owner?._id?.toString() || shop.owner?.toString(), shop]),
+  );
+  const orderCountBySeller = new Map(
+    orderCounts.map((entry) => [entry._id?.toString(), entry.totalOrders]),
   );
 
   const mappedShops = sellers.map((seller) => {
@@ -98,6 +115,7 @@ export const getShops = catchAsync(async (req, res) => {
       banner: shop?.banner || [],
       certificate: shop?.certificate || { public_id: "", url: "" },
       products: shop?.products || [],
+      totalOrders: orderCountBySeller.get(seller._id.toString()) || 0,
       createdAt: seller.createdAt,
     };
   });
@@ -129,11 +147,13 @@ export const getShopById = catchAsync(async (req, res) => {
   let shop = await Shop.findById(req.params.id)
     .populate("products", "title price photos rating reviewsCount verified thumbnail")
     .populate("owner", "name email phone avatar address username");
+  let sellerId = shop?.owner?._id?.toString() || shop?.owner?.toString() || null;
 
   if (!shop) {
     shop = await Shop.findOne({ owner: req.params.id })
       .populate("products", "title price photos rating reviewsCount verified thumbnail")
       .populate("owner", "name email phone avatar address username");
+    sellerId = shop?.owner?._id?.toString() || shop?.owner?.toString() || null;
   }
 
   if (!shop) {
@@ -142,6 +162,7 @@ export const getShopById = catchAsync(async (req, res) => {
     );
 
     if (!seller) throw new AppError(httpStatus.NOT_FOUND, "Shop not found");
+    const totalOrders = await Order.countDocuments({ vendor: seller._id });
 
     return sendResponse(res, {
       statusCode: httpStatus.OK,
@@ -162,15 +183,21 @@ export const getShopById = catchAsync(async (req, res) => {
           username: seller.username,
         },
         products: [],
+        totalOrders,
       },
     });
   }
+
+  const totalOrders = await Order.countDocuments({ vendor: sellerId });
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Shop fetched",
-    data: shop,
+    data: {
+      ...shop.toObject(),
+      totalOrders,
+    },
   });
 });
 
