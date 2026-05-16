@@ -259,6 +259,11 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
   if (!["pending", "accepted", "rejected"].includes(status)) {
     return next(new AppError(400, "Invalid status value"));
   }
+  const request = await DriverRequest.findById(id);
+  if (!request) {
+    return next(new AppError(404, "Driver request not found"));
+  }
+
   if (status === "accepted") {
     const order = await Order.findById(request.orderId);
     if (order) {
@@ -266,19 +271,16 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
       await order.save();
     }
   }
-  const request = await DriverRequest.findByIdAndUpdate(
+  const updatedRequest = await DriverRequest.findByIdAndUpdate(
     id,
     { status },
     { new: true }
   );
-  if (!request) {
-    return next(new AppError(404, "Driver request not found"));
-  }
   return sendResponse(res, {
     statusCode: 200,
     success: true,
     message: "Driver request status updated successfully",
-    data: request,
+    data: updatedRequest,
   }); 
 });
 

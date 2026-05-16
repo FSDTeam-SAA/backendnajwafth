@@ -42,6 +42,13 @@ export const isAdmin = catchAsync(async (req, res, next) => {
   next();
 });
 
+export const isSeller = catchAsync(async (req, res, next) => {
+  if (req.user?.role !== "seller") {
+    throw new AppError(httpStatus.FORBIDDEN, "Access denied. Seller only.");
+  }
+  next();
+});
+
 export const isSpotOwner = catchAsync(async (req, res, next) => {
   if (req.user?.role !== "spotOwner") {
     throw new AppError(

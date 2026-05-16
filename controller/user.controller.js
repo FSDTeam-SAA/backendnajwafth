@@ -1,5 +1,6 @@
 import httpStatus from "http-status";
 import { User } from "../model/user.model.js";
+import { Order } from "../model/order.model.js";
 import { uploadOnCloudinary } from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -94,6 +95,61 @@ export const changePassword = catchAsync(async (req, res) => {
     success: true,
     message: "Password changed successfully",
     data: user,
+  });
+});
+
+// List unique customers who have ordered from this seller
+export const getSellerCustomers = catchAsync(async (req, res) => {
+  const sellerId = req.user._id;
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 10;
+
+  const orders = await Order.find({ vendor: sellerId })
+    .populate("customer", "name email phone avatar")
+    .sort({ createdAt: -1 });
+
+  const map = new Map();
+  for (const order of orders) {
+    const customer = order.customer;
+    if (!customer || !customer._id) continue;
+    const key = customer._id.toString();
+    const existing = map.get(key);
+    if (existing) {
+      existing.totalOrders += 1;
+      existing.totalSpent += order.totalAmount || 0;
+      if (new Date(order.createdAt) > new Date(existing.lastOrderAt)) {
+        existing.orderId = order.orderId;
+        existing.lastOrderAt = order.createdAt;
+        existing.status = order.status;
+      }
+    } else {
+      map.set(key, {
+        _id: key,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        avatar: customer.avatar,
+        orderId: order.orderId,
+        lastOrderAt: order.createdAt,
+        createdAt: order.createdAt,
+        totalOrders: 1,
+        totalSpent: order.totalAmount || 0,
+        status: order.status,
+      });
+    }
+  }
+
+  const all = Array.from(map.values());
+  const total = all.length;
+  const totalPage = Math.max(1, Math.ceil(total / limit));
+  const skip = (page - 1) * limit;
+  const users = all.slice(skip, skip + limit);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Seller customers fetched successfully",
+    data: { users, meta: { page, limit, total, totalPage } },
   });
 });
 
