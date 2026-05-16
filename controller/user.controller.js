@@ -5,6 +5,8 @@ import { uploadOnCloudinary } from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
+import { Book } from "../model/book.model.js";
+import { Review } from "../model/review.model.js";
 
 // Get user profile
 export const getProfile = catchAsync(async (req, res) => {
@@ -189,3 +191,21 @@ export const deleteOwnAccount = catchAsync(async (req, res) => {
     data: null,
   });
 });
+
+
+export const achievement = catchAsync(async (req, res) => {
+  const books =await Book.countDocuments();
+  const users =await User.countDocuments({role:"buyer"});
+  const reviews =await Review.countDocuments();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Achievement fetched successfully",
+    data: {
+      totalBooks: books,
+      totalUsers: users,
+      totalReviews: reviews,
+    }});
+
+})
