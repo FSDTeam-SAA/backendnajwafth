@@ -25,7 +25,7 @@ export const getProfile = catchAsync(async (req, res) => {
 
 // Update profile
 export const updateProfile = catchAsync(async (req, res) => {
-  const { name, phone, bio, gender, dob, age, address } = req.body;
+  const { name, email, phone, bio, gender, dob, age, address } = req.body;
 
   const userId = req.user._id;
 
@@ -39,6 +39,13 @@ export const updateProfile = catchAsync(async (req, res) => {
 
   // Update only provided fields
   if (name !== undefined) user.name = name;
+  if (email !== undefined && email !== user.email) {
+    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    if (existingUser) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Email already in use");
+    }
+    user.email = email;
+  }
   if (phone !== undefined) user.phone = phone;
   if (bio !== undefined) user.bio = bio;
   if (gender !== undefined) user.gender = gender;
@@ -114,8 +121,13 @@ export const getSellerCustomers = catchAsync(async (req, res) => {
     if (!customer || !customer._id) continue;
     const key = customer._id.toString();
     const existing = map.get(key);
+    const orderBookCount = Array.isArray(order.items)
+      ? order.items.reduce((sum, item) => sum + (item.quantity || 0), 0)
+      : 0;
+
     if (existing) {
       existing.totalOrders += 1;
+      existing.totalBooks += orderBookCount;
       existing.totalSpent += order.totalAmount || 0;
       if (new Date(order.createdAt) > new Date(existing.lastOrderAt)) {
         existing.orderId = order.orderId;
@@ -133,6 +145,7 @@ export const getSellerCustomers = catchAsync(async (req, res) => {
         lastOrderAt: order.createdAt,
         createdAt: order.createdAt,
         totalOrders: 1,
+        totalBooks: orderBookCount,
         totalSpent: order.totalAmount || 0,
         status: order.status,
       });
@@ -149,7 +162,15 @@ export const getSellerCustomers = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Seller customers fetched successfully",
-    data: { users, meta: { page, limit, total, totalPage } },
+    data: {
+      users,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPage,
+      },
+    },
   });
 });
 

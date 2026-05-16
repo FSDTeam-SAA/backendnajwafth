@@ -3,32 +3,34 @@ import AppError from "../errors/AppError.js";
 import { Book } from "../model/book.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
+import { uploadOnCloudinary } from "../utils/commonMethod.js";
 
+async function resolveCoverImage(req) {
+  if (req.file) {
+    const upload = await uploadOnCloudinary(req.file.buffer);
+    return upload.secure_url;
+  }
 
-/**
- * 🟢 Create Book
- */
+  if (typeof req.body.coverImage === "string" && req.body.coverImage.trim()) {
+    return req.body.coverImage.trim();
+  }
+
+  return undefined;
+}
+
 export const createBook = catchAsync(async (req, res) => {
-  const {
-    shopId,
-    title,
-    author,
-    category,
-    price,
-    description,
-    coverImage,
-    stock,
-  } = req.body;
+  const { title, author, category, price, description, stock } = req.body;
+  const coverImage = await resolveCoverImage(req);
 
   const book = await Book.create({
-    shopId,
+    shopId: req.user._id,
     title,
     author,
     category,
     price,
     description,
     coverImage,
-    stock,
+    stock: stock === "true" || stock === true,
   });
 
   return sendResponse(res, {
@@ -39,13 +41,9 @@ export const createBook = catchAsync(async (req, res) => {
   });
 });
 
-/**
- * 🔵 Get All Books (Search + Filter + Pagination + Sorting)
- */
 export const getAllBooks = catchAsync(async (req, res) => {
   const {
     search,
-    shopId,
     category,
     stock,
     minPrice,
@@ -56,19 +54,15 @@ export const getAllBooks = catchAsync(async (req, res) => {
     sortOrder = "desc",
   } = req.query;
 
-  const filter = {};
+  const filter = {
+    shopId: req.user._id,
+  };
 
-  // 🔍 Search
   if (search) {
     filter.$or = [
       { title: { $regex: search, $options: "i" } },
       { author: { $regex: search, $options: "i" } },
     ];
-  }
-
-  // 🎯 Filters
-  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
-    filter.shopId = shopId;
   }
 
   if (category && mongoose.Types.ObjectId.isValid(category)) {
@@ -79,7 +73,6 @@ export const getAllBooks = catchAsync(async (req, res) => {
     filter.stock = stock === "true";
   }
 
-  // 💰 Price Range
   if (minPrice || maxPrice) {
     filter.price = {};
     if (minPrice) filter.price.$gte = Number(minPrice);
@@ -87,7 +80,6 @@ export const getAllBooks = catchAsync(async (req, res) => {
   }
 
   const skip = (Number(page) - 1) * Number(limit);
-
   const sortOptions = {
     [sortBy]: sortOrder === "asc" ? 1 : -1,
   };
@@ -99,7 +91,6 @@ export const getAllBooks = catchAsync(async (req, res) => {
       .sort(sortOptions)
       .skip(skip)
       .limit(Number(limit)),
-
     Book.countDocuments(filter),
   ]);
 
@@ -107,32 +98,31 @@ export const getAllBooks = catchAsync(async (req, res) => {
     statusCode: 200,
     success: true,
     message: "Books fetched successfully",
-   
-    data: {books, meta: {
-      page: Number(page),
-      limit: Number(limit),
-      total,
-      totalPage: Math.ceil(total / limit),
-    },},
+    data: {
+      books,
+      meta: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPage: Math.ceil(total / Number(limit)),
+      },
+    },
   });
 });
 
-/**
- * 🟣 Get Single Book
- */
 export const getSingleBook = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return next(new AppError(400,"Invalid book ID" ));
+    return next(new AppError(400, "Invalid book ID"));
   }
 
-  const book = await Book.findById(id)
+  const book = await Book.findOne({ _id: id, shopId: req.user._id })
     .populate("shopId", "name email")
     .populate("category", "name");
 
   if (!book) {
-    return next(new AppError(404,"Book not found"));
+    return next(new AppError(404, "Book not found"));
   }
 
   return sendResponse(res, {
@@ -143,47 +133,39 @@ export const getSingleBook = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * 🟡 Update Book
- */
 export const updateBook = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
-  const {
-    shopId,
-    title,
-    author,
-    category,
-    price,
-    description,
-    coverImage,
-    stock,
-  } = req.body;
-
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return next(new AppError("Invalid book ID", 400));
+    return next(new AppError(400, "Invalid book ID"));
   }
 
-  const book = await Book.findByIdAndUpdate(
-    id,
-    {
-      shopId,
-      title,
-      author,
-      category,
-      price,
-      description,
-      coverImage,
-      stock,
-    },
-    {
-      new: true,
-      runValidators: true,
+  const updates = {};
+  const fields = ["title", "author", "category", "price", "description"];
+
+  fields.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      updates[field] = req.body[field];
     }
+  });
+
+  if (req.body.stock !== undefined) {
+    updates.stock = req.body.stock === "true" || req.body.stock === true;
+  }
+
+  const coverImage = await resolveCoverImage(req);
+  if (coverImage !== undefined) {
+    updates.coverImage = coverImage;
+  }
+
+  const book = await Book.findOneAndUpdate(
+    { _id: id, shopId: req.user._id },
+    updates,
+    { new: true, runValidators: true },
   );
 
   if (!book) {
-    return next(new AppError("Book not found", 404));
+    return next(new AppError(404, "Book not found"));
   }
 
   return sendResponse(res, {
@@ -194,20 +176,17 @@ export const updateBook = catchAsync(async (req, res, next) => {
   });
 });
 
-/**
- * 🔴 Delete Book
- */
 export const deleteBook = catchAsync(async (req, res, next) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return next(new AppError("Invalid book ID", 400));
+    return next(new AppError(400, "Invalid book ID"));
   }
 
-  const book = await Book.findByIdAndDelete(id);
+  const book = await Book.findOneAndDelete({ _id: id, shopId: req.user._id });
 
   if (!book) {
-    return next(new AppError("Book not found", 404));
+    return next(new AppError(404, "Book not found"));
   }
 
   return sendResponse(res, {
