@@ -246,9 +246,9 @@ export const getMyOrders = catchAsync(async (req, res) => {
 
   const [orders, total] = await Promise.all([
     OrderModel.find(filter)
-      .populate("items.product", "title price photos")
+      .populate("items.product", "title price coverImage")
       .populate("customer", "name email")
-      .populate("vendor", "name storeName")
+      .populate("vendor", "name storeName address")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum),
