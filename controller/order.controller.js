@@ -1,4 +1,5 @@
 import httpStatus from "http-status";
+import mongoose from "mongoose";
 import { Order as OrderModel } from "../model/order.model.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -84,7 +85,7 @@ export const createOrder = catchAsync(async (req, res) => {
 });
 
 export const getOrders = catchAsync(async (req, res) => {
-  const { status, page = 1, limit = 10 } = req.query;
+  const { status, vendorId, page = 1, limit = 10 } = req.query;
   const pageNum = Number(page);
   const limitNum = Number(limit);
   const query = { customer: req.user._id };
@@ -95,6 +96,9 @@ export const getOrders = catchAsync(async (req, res) => {
     delete query.customer;
   } else if (req.user.role === "admin") {
     delete query.customer;
+    if (vendorId && mongoose.Types.ObjectId.isValid(vendorId)) {
+      query.vendor = vendorId;
+    }
   }
 
   const [orders, total] = await Promise.all([
