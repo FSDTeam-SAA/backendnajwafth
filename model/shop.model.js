@@ -26,7 +26,7 @@ const shopSchema = new Schema({
   products: [
     {
       type: Schema.Types.ObjectId,
-      ref: "Product",
+      ref: "Book",
     },
   ],
   owner: {

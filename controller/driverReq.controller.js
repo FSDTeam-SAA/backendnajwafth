@@ -38,6 +38,15 @@ export const createDriverRequest = catchAsync(async (req, res) => {
     }
 
     resolvedOrderId = order._id;
+
+    const existingRequest = await DriverRequest.findOne({
+      shopId: req.user._id,
+      orderId: resolvedOrderId,
+    });
+
+    if (existingRequest) {
+      throw new AppError(400, "Driver request already exists for this order");
+    }
   }
 
   const driverRequest = await DriverRequest.create({
@@ -90,6 +99,7 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
   const [requests, total] = await Promise.all([
     DriverRequest.find(filter)
       .populate("shopId", "name email")
+      .populate("driver", "name email phone avatar")
       .populate("orderId")
       .sort({ createdAt: -1 })
       .skip(skip)
@@ -281,7 +291,9 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
     id,
     { driver: driverId },
     { new: true }
-  );
+  )
+    .populate("driver", "name email phone avatar")
+    .populate("orderId");
   if (!request) {
     return next(new AppError(404, "Driver request not found"));
   }

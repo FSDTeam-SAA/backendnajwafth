@@ -1,6 +1,7 @@
 import httpStatus from "http-status";
 import { User } from "../model/user.model.js";
 import { Order } from "../model/order.model.js";
+import { DriverRequest } from "../model/driveReq.model.js";
 import { uploadOnCloudinary } from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
@@ -171,6 +172,71 @@ export const getSellerCustomers = catchAsync(async (req, res) => {
         totalPage,
       },
     },
+  });
+});
+
+export const getAdminDrivers = catchAsync(async (_req, res) => {
+  const drivers = await User.find({ role: "driver" })
+    .select("-password -refreshToken -verificationInfo -password_reset_token")
+    .sort({ createdAt: -1 });
+
+  const driverIds = drivers.map((driver) => driver._id);
+
+  const [activeAssignments, completedDeliveries] = await Promise.all([
+    DriverRequest.aggregate([
+      {
+        $match: {
+          driver: { $in: driverIds },
+          status: { $in: ["pending", "accepted"] },
+        },
+      },
+      {
+        $group: {
+          _id: "$driver",
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+    Order.aggregate([
+      {
+        $match: {
+          driver: { $in: driverIds },
+          status: "delivered",
+        },
+      },
+      {
+        $group: {
+          _id: "$driver",
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+
+  const activeMap = new Map(
+    activeAssignments.map((entry) => [entry._id.toString(), entry.count]),
+  );
+  const completedMap = new Map(
+    completedDeliveries.map((entry) => [entry._id.toString(), entry.count]),
+  );
+
+  const data = drivers.map((driver) => {
+    const key = driver._id.toString();
+    const currentOrders = activeMap.get(key) || 0;
+
+    return {
+      ...driver.toObject(),
+      status: currentOrders > 0 ? "busy" : "available",
+      currentOrders,
+      completedDeliveries: completedMap.get(key) || 0,
+    };
+  });
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Drivers fetched successfully",
+    data,
   });
 });
 

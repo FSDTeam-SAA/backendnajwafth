@@ -4,6 +4,7 @@ import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Shop } from "../model/shop.model.js";
+import { User } from "../model/user.model.js";
 
 const applyShopUpdates = async (shop, req) => {
   const { name, description, address, deliveryArea } = req.body;
@@ -49,31 +50,71 @@ export const getShops = catchAsync(async (req, res) => {
   const page = Number(req.query.page || 1);
   const limit = Number(req.query.limit || 10);
   const skip = (page - 1) * limit;
-  const query = {};
-
-  if (req.query.status) {
-    query.shopStatus = req.query.status;
-  }
+  const sellerQuery = { role: "seller" };
 
   if (req.query.search) {
-    query.name = { $regex: req.query.search, $options: "i" };
+    sellerQuery.$or = [
+      { name: { $regex: req.query.search, $options: "i" } },
+      { email: { $regex: req.query.search, $options: "i" } },
+      { phone: { $regex: req.query.search, $options: "i" } },
+      { username: { $regex: req.query.search, $options: "i" } },
+    ];
   }
 
-  const [shops, total] = await Promise.all([
-    Shop.find(query)
-      .populate("owner", "name email phone avatar")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit),
-    Shop.countDocuments(query),
-  ]);
+  const sellers = await User.find(sellerQuery)
+    .select("name email phone avatar address username createdAt")
+    .sort({ createdAt: -1 });
+
+  const sellerIds = sellers.map((seller) => seller._id);
+  const shopDocs = await Shop.find({ owner: { $in: sellerIds } }).populate(
+    "owner",
+    "name email phone avatar address username",
+  );
+
+  const shopByOwner = new Map(
+    shopDocs.map((shop) => [shop.owner?._id?.toString() || shop.owner?.toString(), shop]),
+  );
+
+  const mappedShops = sellers.map((seller) => {
+    const shop = shopByOwner.get(seller._id.toString());
+
+    return {
+      _id: seller._id,
+      shopId: shop?._id || null,
+      name: shop?.name || seller.name || seller.username || "Books store",
+      description: shop?.description || "",
+      address: shop?.address || seller.address || "",
+      deliveryArea: shop?.deliveryArea || "",
+      shopStatus: shop?.shopStatus || "not verified",
+      owner: {
+        _id: seller._id,
+        name: seller.name,
+        email: seller.email,
+        phone: seller.phone,
+        avatar: seller.avatar,
+        address: seller.address,
+        username: seller.username,
+      },
+      banner: shop?.banner || [],
+      certificate: shop?.certificate || { public_id: "", url: "" },
+      products: shop?.products || [],
+      createdAt: seller.createdAt,
+    };
+  });
+
+  const filteredShops = req.query.status
+    ? mappedShops.filter((shop) => shop.shopStatus === req.query.status)
+    : mappedShops;
+
+  const paginatedShops = filteredShops.slice(skip, skip + limit);
+  const total = filteredShops.length;
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Shops fetched",
     data: {
-      shops,
+      shops: paginatedShops,
       pagination: {
         total,
         page,
@@ -85,11 +126,46 @@ export const getShops = catchAsync(async (req, res) => {
 });
 
 export const getShopById = catchAsync(async (req, res) => {
-  const shop = await Shop.findById(req.params.id).populate(
-    "products",
-    "title price photos rating reviewsCount verified thumbnail",
-  );
-  if (!shop) throw new AppError(httpStatus.NOT_FOUND, "Shop not found");
+  let shop = await Shop.findById(req.params.id)
+    .populate("products", "title price photos rating reviewsCount verified thumbnail")
+    .populate("owner", "name email phone avatar address username");
+
+  if (!shop) {
+    shop = await Shop.findOne({ owner: req.params.id })
+      .populate("products", "title price photos rating reviewsCount verified thumbnail")
+      .populate("owner", "name email phone avatar address username");
+  }
+
+  if (!shop) {
+    const seller = await User.findOne({ _id: req.params.id, role: "seller" }).select(
+      "name email phone avatar address username",
+    );
+
+    if (!seller) throw new AppError(httpStatus.NOT_FOUND, "Shop not found");
+
+    return sendResponse(res, {
+      statusCode: httpStatus.OK,
+      success: true,
+      message: "Shop fetched",
+      data: {
+        _id: seller._id,
+        name: seller.name || seller.username || "Books store",
+        address: seller.address || "",
+        shopStatus: "not verified",
+        owner: {
+          _id: seller._id,
+          name: seller.name,
+          email: seller.email,
+          phone: seller.phone,
+          avatar: seller.avatar,
+          address: seller.address,
+          username: seller.username,
+        },
+        products: [],
+      },
+    });
+  }
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,

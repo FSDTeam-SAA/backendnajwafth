@@ -119,8 +119,9 @@ export const getSellerOverview = catchAsync(async (req, res) => {
 });
 
 export const getAdminOverview = catchAsync(async (_req, res) => {
-  const [shops, drivers, driverRequests, completedOrders, recentOrders, recentDriverRequests] = await Promise.all([
-    Shop.find().sort({ createdAt: -1 }).limit(8).populate("owner", "name email phone"),
+  const [recentSellerUsers, totalBookstores, drivers, driverRequests, completedOrders, recentOrders, recentDriverRequests] = await Promise.all([
+    User.find({ role: "seller" }).sort({ createdAt: -1 }).limit(8).select("name email phone avatar address username"),
+    User.countDocuments({ role: "seller" }),
     User.find({ role: "driver" }).sort({ createdAt: -1 }).limit(8).select("name email phone avatar createdAt"),
     DriverRequest.find()
       .populate("shopId", "name email phone")
@@ -140,13 +141,29 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
       .limit(8),
   ]);
 
+  const recentShopDocs = await Shop.find({
+    owner: { $in: recentSellerUsers.map((seller) => seller._id) },
+  }).select("name owner");
+
+  const shopByOwner = new Map(
+    recentShopDocs.map((shop) => [shop.owner?.toString(), shop]),
+  );
+
+  const recentShops = recentSellerUsers.map((seller) => {
+    const shop = shopByOwner.get(seller._id.toString());
+    return {
+      _id: seller._id,
+      name: shop?.name || seller.name || seller.username || "Books store",
+    };
+  });
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Admin dashboard overview fetched successfully",
     data: {
       metrics: {
-        totalBookstores: shops.length,
+        totalBookstores,
         totalDrivers: drivers.length,
         totalDriverRequests: driverRequests.length,
         totalCompleted: completedOrders.length,
@@ -154,7 +171,7 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
       deliveryActivity: buildMonthlyDeliveryActivity(completedOrders),
       recentOrders,
       recentDriverRequests,
-      recentShops: shops,
+      recentShops,
       recentDrivers: drivers,
     },
   });

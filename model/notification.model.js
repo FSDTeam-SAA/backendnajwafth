@@ -15,7 +15,7 @@ const notificationSchema = new Schema(
     },
     product: {
       type: Schema.Types.ObjectId,
-      ref: "Product",
+      ref: "Book",
       default: null,
     },
     order: {
