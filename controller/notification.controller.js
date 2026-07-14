@@ -1,4 +1,5 @@
 import httpStatus from "http-status";
+import mongoose from "mongoose";
 import AppError from "../errors/AppError.js";
 import { Notification } from "../model/notification.model.js";
 import catchAsync from "../utils/catchAsync.js";
@@ -22,6 +23,28 @@ const buildNotificationQuery = (req) => {
   return query;
 };
 
+const notificationPopulateOptions = [
+  { path: "actor", select: "name firstName lastName email storeName avatar", model: "User" },
+  { path: "product", select: "title thumbnail photos", model: "Book" },
+  { path: "order", select: "orderId status totalAmount", model: "Order" },
+  { path: "chat", select: "seller user", model: "Chat" },
+  { path: "shop", select: "name shopStatus", model: "Shop" },
+  { path: "service", select: "title verified", model: "Service" },
+  { path: "subscription", select: "planName", model: "Subscription" },
+  { path: "payment", select: "transactionId type price paymentStatus", model: "paymentInfo" },
+  { path: "contactUs", select: "subject email", model: "ContactUs" },
+];
+
+const populateRegisteredNotificationRefs = (query) => {
+  return notificationPopulateOptions.reduce((currentQuery, option) => {
+    if (!mongoose.models[option.model]) {
+      return currentQuery;
+    }
+
+    return currentQuery.populate(option.path, option.select);
+  }, query);
+};
+
 export const getMyNotifications = catchAsync(async (req, res) => {
   const page = Number(req.query.page || 1);
   const limit = Number(req.query.limit || 20);
@@ -29,16 +52,7 @@ export const getMyNotifications = catchAsync(async (req, res) => {
   const query = buildNotificationQuery(req);
 
   const [notifications, total, unreadCount] = await Promise.all([
-    Notification.find(query)
-      .populate("actor", "name firstName lastName email storeName avatar")
-      .populate("product", "title thumbnail photos")
-      .populate("order", "orderId status totalAmount")
-      .populate("chat", "seller user")
-      .populate("shop", "name shopStatus")
-      .populate("service", "title verified")
-      .populate("subscription", "planName")
-      .populate("payment", "transactionId type price paymentStatus")
-      .populate("contactUs", "subject email")
+    populateRegisteredNotificationRefs(Notification.find(query))
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),

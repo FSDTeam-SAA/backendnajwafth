@@ -19,6 +19,26 @@ async function resolveCoverImage(req) {
   return undefined;
 }
 
+function parseStockQuantity(value, { required = false } = {}) {
+  if (value === undefined || value === null || value === "") {
+    if (required) {
+      throw new AppError(400, "Stock quantity is required");
+    }
+
+    return undefined;
+  }
+
+  if (value === true || value === "true") return 1;
+  if (value === false || value === "false") return 0;
+
+  const stock = Number(value);
+  if (!Number.isInteger(stock) || stock < 0) {
+    throw new AppError(400, "Stock quantity must be a non-negative whole number");
+  }
+
+  return stock;
+}
+
 export const createBook = catchAsync(async (req, res) => {
   const { title, author, category, price, description, stock } = req.body;
   const coverImage = await resolveCoverImage(req);
@@ -31,7 +51,7 @@ export const createBook = catchAsync(async (req, res) => {
     price,
     description,
     coverImage,
-    stock: stock === "true" || stock === true,
+    stock: parseStockQuantity(stock, { required: true }),
   });
 
   return sendResponse(res, {
@@ -78,7 +98,7 @@ export const getAllBooks = catchAsync(async (req, res) => {
   }
 
   if (stock !== undefined) {
-    filter.stock = stock === "true";
+    filter.stock = stock === "true" ? { $gt: 0 } : { $lte: 0 };
   }
 
   if (minPrice || maxPrice) {
@@ -195,7 +215,7 @@ export const updateBook = catchAsync(async (req, res, next) => {
   });
 
   if (req.body.stock !== undefined) {
-    updates.stock = req.body.stock === "true" || req.body.stock === true;
+    updates.stock = parseStockQuantity(req.body.stock);
   }
 
   const coverImage = await resolveCoverImage(req);

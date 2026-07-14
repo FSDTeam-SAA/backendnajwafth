@@ -5,27 +5,43 @@ import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 
+const parseRequestedQuantity = (value) => {
+  const quantity = Number(value || 0);
+
+  if (!Number.isInteger(quantity)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Quantity must be a whole number");
+  }
+
+  return quantity;
+};
+
 export const addToCart = catchAsync(async (req, res) => {
   const { product, quantity = 1 } = req.body;
+  const requestedQuantity = parseRequestedQuantity(quantity);
   const user = req.user._id;
 
   let cart = await CartModel.findOne({ user });
 
   const prod = await Book.findById(product);
-  if (!prod || !prod.stock ) {
+  if (!prod || requestedQuantity < 1 || Number(prod.stock) < requestedQuantity) {
     throw new AppError(httpStatus.BAD_REQUEST, "Product unavailable");
   }
 
   if (!cart) {
-    cart = await CartModel.create({ user, items: [{ product, quantity }] });
+    cart = await CartModel.create({ user, items: [{ product, quantity: requestedQuantity }] });
   } else {
     const existingItem = cart.items.find(
       (item) => item.product.toString() === product
     );
     if (existingItem) {
-      existingItem.quantity += quantity;
+      const nextQuantity = existingItem.quantity + requestedQuantity;
+      if (Number(prod.stock) < nextQuantity) {
+        throw new AppError(httpStatus.BAD_REQUEST, "Requested quantity exceeds available stock");
+      }
+
+      existingItem.quantity = nextQuantity;
     } else {
-      cart.items.push({ product, quantity });
+      cart.items.push({ product, quantity: requestedQuantity });
     }
   }
 
@@ -62,6 +78,7 @@ export const getCart = catchAsync(async (req, res) => {
 
 export const updateCart = catchAsync(async (req, res) => {
   const { product, quantity } = req.body;
+  const requestedQuantity = parseRequestedQuantity(quantity);
   const cart = await CartModel.findOne({ user: req.user._id });
 
   if (!cart) throw new AppError(httpStatus.NOT_FOUND, "Cart not found");
@@ -69,8 +86,15 @@ export const updateCart = catchAsync(async (req, res) => {
   const item = cart.items.find((i) => i.product.toString() === product);
   if (!item) throw new AppError(httpStatus.NOT_FOUND, "Item not in cart");
 
-  item.quantity = quantity;
-  if (quantity <= 0) {
+  if (requestedQuantity > 0) {
+    const prod = await Book.findById(product);
+    if (!prod || Number(prod.stock) < requestedQuantity) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Requested quantity exceeds available stock");
+    }
+  }
+
+  item.quantity = requestedQuantity;
+  if (requestedQuantity <= 0) {
     cart.items = cart.items.filter((i) => i.product.toString() !== product);
   }
 
