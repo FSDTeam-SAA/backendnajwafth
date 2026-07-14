@@ -36,8 +36,10 @@ const bookSchema = new mongoose.Schema(
       type: String, 
     },
     stock: {
-      type: Boolean, 
-        required: true,
+      type: Number,
+      required: true,
+      min: [0, "Stock quantity cannot be negative"],
+      default: 0,
     }
   },
   { timestamps: true },

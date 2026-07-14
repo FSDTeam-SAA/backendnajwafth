@@ -11,6 +11,16 @@ import { createNotification, getUserDisplayName } from "../utils/notification.js
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
+const parseRequestedQuantity = (value) => {
+  const quantity = Number(value || 0);
+
+  if (!Number.isInteger(quantity)) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Quantity must be a whole number");
+  }
+
+  return quantity;
+};
+
 export const createOrder = catchAsync(async (req, res) => {
   const { items, address } = req.body;
   const customer = req.user._id;
@@ -18,19 +28,19 @@ export const createOrder = catchAsync(async (req, res) => {
   let totalAmount = 0;
   const orderItems = [];
   for (let item of items) {
-    
+    const requestedQuantity = parseRequestedQuantity(item.quantity);
     const product = await Book.findById(item.product.toString());
-    if (!product || ! product.stock) {
+    if (!product || requestedQuantity < 1 || Number(product.stock) < requestedQuantity) {
       console.log("Product not found or out of stock:", product);
       throw new AppError(
         httpStatus.BAD_REQUEST,
         `Insufficient stock for ${product?.title}`,
       );
     }
-    totalAmount += product.price * item.quantity;
+    totalAmount += product.price * requestedQuantity;
     orderItems.push({
       product: item.product,
-      quantity: item.quantity,
+      quantity: requestedQuantity,
       price: product.price,
       vendor: product.shopId,
     });

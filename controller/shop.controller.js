@@ -47,6 +47,14 @@ const applyShopUpdates = async (shop, req) => {
   if (Object.keys(certificate).length > 0) shop.certificate = certificate;
 };
 
+const buildSellerShopDefaults = (user) => ({
+  name: user.name || user.username || "Books store",
+  description: "",
+  address: user.address || "",
+  deliveryArea: "",
+  owner: user._id,
+});
+
 export const getShops = catchAsync(async (req, res) => {
   const page = Number(req.query.page || 1);
   const limit = Number(req.query.limit || 10);
@@ -229,19 +237,14 @@ export const updateShop = catchAsync(async (req, res) => {
 });
 
 export const getMyShop = catchAsync(async (req, res) => {
-  const shopId = req.user.shopId;
+  let shop = await Shop.findOne({ owner: req.user._id }).populate(
+    "products",
+    "title price photos rating reviewsCount verified thumbnail",
+  );
 
-  const shop = shopId
-    ? await Shop.findById(shopId).populate(
-        "products",
-        "title price photos rating reviewsCount verified thumbnail",
-      )
-    : await Shop.findOne({ owner: req.user._id }).populate(
-        "products",
-        "title price photos rating reviewsCount verified thumbnail",
-      );
-
-  if (!shop) throw new AppError(httpStatus.NOT_FOUND, "Shop not found");
+  if (!shop) {
+    shop = await Shop.create(buildSellerShopDefaults(req.user));
+  }
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
@@ -252,12 +255,11 @@ export const getMyShop = catchAsync(async (req, res) => {
 });
 
 export const updateMyShop = catchAsync(async (req, res) => {
-  const shopId = req.user.shopId;
-  const shop = shopId
-    ? await Shop.findById(shopId)
-    : await Shop.findOne({ owner: req.user._id });
+  let shop = await Shop.findOne({ owner: req.user._id });
 
-  if (!shop) throw new AppError(httpStatus.NOT_FOUND, "Shop not found");
+  if (!shop) {
+    shop = new Shop(buildSellerShopDefaults(req.user));
+  }
 
   if (
     req.user.role === "seller" &&
