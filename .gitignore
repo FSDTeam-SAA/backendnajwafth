@@ -1,6 +1,9 @@
 node_modules/
+.env
+serviceAccountKey.json
 config.bat
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
 .gitignore
+serviceAccountKey.json

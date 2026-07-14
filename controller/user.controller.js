@@ -51,9 +51,24 @@ export const updateProfile = catchAsync(async (req, res) => {
   }
   if (phone !== undefined) user.phone = phone;
   if (bio !== undefined) user.bio = bio;
-  if (gender !== undefined) user.gender = gender;
-  if (dob !== undefined) user.dob = dob;
-  if (age !== undefined) user.age = age;
+  if (gender !== undefined && gender !== "") user.gender = gender;
+  if (dob !== undefined && dob !== "") {
+    const parsedDob = new Date(dob);
+    if (Number.isNaN(parsedDob.getTime())) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Invalid date of birth");
+    }
+    user.dob = parsedDob;
+  }
+  if (age !== undefined && age !== "") {
+    const parsedAge = Number(age);
+    if (!Number.isInteger(parsedAge) || parsedAge < 0) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Age must be a non-negative whole number",
+      );
+    }
+    user.age = parsedAge;
+  }
   if (address !== undefined) user.address = address;
 
   if (req.file) {

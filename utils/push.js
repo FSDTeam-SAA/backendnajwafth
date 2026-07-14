@@ -12,8 +12,10 @@ export const sendPushToUser = async (userId, { title, body, data = {} }) => {
   if (!isPushEnabled() || !userId) return;
 
   try {
-    const user = await User.findById(userId).select("pushEnabled fcmTokens");
-    if (!user || user.pushEnabled === false) return;
+    const user = await User.findById(userId).select(
+      "enableNotifications fcmTokens",
+    );
+    if (!user || user.enableNotifications === false) return;
 
     const tokens = (user.fcmTokens || []).filter(Boolean);
     if (!tokens.length) return;
