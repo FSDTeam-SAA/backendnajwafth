@@ -1,83 +1,73 @@
 import { Order } from "../model/order.model.js";
 import { paymentInfo } from "../model/payment.model.js";
-import { Subscription } from "../model/subscription.model.js";
-import { User } from "../model/user.model.js";
 import Stripe from "stripe";
 import { createNotification } from "../utils/notification.js";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2022-11-15",
-});
+// Lazily construct the Stripe client so the server can boot (and every
+// non-payment route keeps working) even when STRIPE_SECRET_KEY is not set.
+let stripeClient = null;
+const getStripe = () => {
+  if (!process.env.STRIPE_SECRET_KEY) return null;
+  if (!stripeClient) {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2022-11-15",
+    });
+  }
+  return stripeClient;
+};
 
 // Admin commission rate - 4.99%
 const ADMIN_COMMISSION_RATE = 0.0499;
 
 export const createPayment = async (req, res) => {
-  const { userId, price, orderId, subscriptionId, type, billingPeriod } =
-    req.body;
+  const { price, orderId, type } = req.body;
+  // Prefer the authenticated user; fall back to an explicit body field for
+  // legacy callers.
+  const userId = req.user?._id?.toString() || req.body.userId;
+
+  const stripe = getStripe();
+  if (!stripe) {
+    return res.status(503).json({
+      error: "Payments are not configured. Set STRIPE_SECRET_KEY on the server.",
+    });
+  }
 
   if (!price || !type) {
     return res.status(400).json({ error: "Price and type are required." });
   }
 
-  // Validate type-specific requirements
-  if (type === "order" && !orderId) {
+  if (type !== "order") {
+    return res
+      .status(400)
+      .json({ error: "Only order payments are supported." });
+  }
+
+  if (!orderId) {
     return res
       .status(400)
       .json({ error: "Order ID is required for order payments." });
   }
 
-  if (type === "subscription" && (!subscriptionId || !billingPeriod)) {
-    return res.status(400).json({
-      error:
-        "Subscription ID and billing period are required for subscription payments.",
-    });
-  }
-
   try {
-    // For subscription payments, verify the subscription exists
-    if (type === "subscription") {
-      const subscription = await Subscription.findById(subscriptionId);
-      if (!subscription) {
-        return res.status(404).json({ error: "Subscription plan not found." });
-      }
-
-      // Verify price matches the selected billing period
-      const expectedPrice =
-        billingPeriod === "yearly"
-          ? subscription.pricePerYear
-          : subscription.pricePerMonth;
-      if (Math.abs(price - expectedPrice) > 0.01) {
-        return res
-          .status(400)
-          .json({ error: "Price mismatch with subscription plan." });
-      }
-    }
-
-    // Create metadata based on payment type
-    const metadata = { userId, type };
-    if (orderId) metadata.orderId = orderId;
-    if (subscriptionId) {
-      metadata.subscriptionId = subscriptionId;
-      metadata.billingPeriod = billingPeriod;
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ error: "Order not found." });
     }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(price * 100),
       currency: "usd",
       automatic_payment_methods: { enabled: true },
-      metadata,
+      metadata: { userId, type, orderId },
     });
 
     await paymentInfo.create({
       userId,
-      orderId: orderId || null,
-      subscriptionId: subscriptionId || null,
+      orderId,
       price,
       transactionId: paymentIntent.id,
       paymentStatus: "pending",
       type,
-      billingPeriod: billingPeriod || null,
     });
 
     res.status(200).json({
@@ -94,6 +84,13 @@ export const createPayment = async (req, res) => {
 
 export const confirmPayment = async (req, res) => {
   const { paymentIntentId } = req.body;
+
+  const stripe = getStripe();
+  if (!stripe) {
+    return res.status(503).json({
+      error: "Payments are not configured. Set STRIPE_SECRET_KEY on the server.",
+    });
+  }
 
   if (!paymentIntentId) {
     return res.status(400).json({ error: "Missing paymentIntentId" });
@@ -161,70 +158,35 @@ export const confirmPayment = async (req, res) => {
       }
     }
 
-    // Handle subscription payment
-    let subscription = null;
-    if (paymentRecord.subscriptionId && paymentRecord.type === "subscription") {
-      const user = await User.findById(paymentRecord.userId);
-      if (user && user.role === "seller") {
-        subscription = await Subscription.findById(
-          paymentRecord.subscriptionId,
-        );
-        if (subscription) {
-          await Subscription.findByIdAndUpdate(paymentRecord.subscriptionId, {
-            paymentStatus: "paid",
-          });
-        }
-      }
-    }
-
-    if (!wasAlreadyComplete) {
-      if (order) {
-        await Promise.all([
-          createNotification({
-            user: order.customer?._id || paymentRecord.userId,
-            actor: paymentRecord.userId,
-            order: order._id,
-            payment: paymentRecord._id,
-            type: "payment_success",
-            title: "Payment successful",
-            message: `Your payment for order ${order.orderId} was confirmed successfully.`,
-            metadata: {
-              orderId: order.orderId,
-              amount: paymentRecord.price,
-            },
-          }),
-          createNotification({
-            user: order.vendor?._id,
-            actor: paymentRecord.userId,
-            order: order._id,
-            payment: paymentRecord._id,
-            type: "order_paid",
-            title: "Order payment received",
-            message: `Payment for order ${order.orderId} has been confirmed.`,
-            metadata: {
-              orderId: order.orderId,
-              amount: paymentRecord.price,
-            },
-          }),
-        ]);
-      }
-
-      if (subscription) {
-        await createNotification({
-          user: paymentRecord.userId,
+    if (!wasAlreadyComplete && order) {
+      await Promise.all([
+        createNotification({
+          user: order.customer?._id || paymentRecord.userId,
           actor: paymentRecord.userId,
-          subscription: subscription._id,
+          order: order._id,
           payment: paymentRecord._id,
-          type: "subscription_paid",
-          title: "Subscription payment successful",
-          message: `Your payment for the ${subscription.planName} plan was confirmed successfully.`,
+          type: "payment_success",
+          title: "Payment successful",
+          message: `Your payment for order ${order.orderId} was confirmed successfully.`,
           metadata: {
-            subscriptionId: subscription._id.toString(),
+            orderId: order.orderId,
             amount: paymentRecord.price,
-            billingPeriod: paymentRecord.billingPeriod,
           },
-        });
-      }
+        }),
+        createNotification({
+          user: order.vendor?._id,
+          actor: paymentRecord.userId,
+          order: order._id,
+          payment: paymentRecord._id,
+          type: "order_paid",
+          title: "Order payment received",
+          message: `Payment for order ${order.orderId} has been confirmed.`,
+          metadata: {
+            orderId: order.orderId,
+            amount: paymentRecord.price,
+          },
+        }),
+      ]);
     }
 
     return res.status(200).json({
