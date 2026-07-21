@@ -8,12 +8,19 @@ import { Shop } from "../model/shop.model.js";
 import { User } from "../model/user.model.js";
 
 const applyShopUpdates = async (shop, req) => {
-  const { name, description, address, deliveryArea } = req.body;
+  const { name, description, address, deliveryArea, deliveryFee } = req.body;
 
   if (name) shop.name = name;
   if (description) shop.description = description;
   if (address) shop.address = address;
   if (deliveryArea !== undefined) shop.deliveryArea = deliveryArea;
+  if (deliveryFee !== undefined) {
+    const parsedDeliveryFee = Number(deliveryFee);
+    if (!Number.isFinite(parsedDeliveryFee) || parsedDeliveryFee < 0) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Delivery fee must be a valid positive number");
+    }
+    shop.deliveryFee = parsedDeliveryFee;
+  }
 
   const banner = {};
   const certificate = {};
@@ -52,6 +59,7 @@ const buildSellerShopDefaults = (user) => ({
   description: "",
   address: user.address || "",
   deliveryArea: "",
+  deliveryFee: 5,
   owner: user._id,
 });
 
@@ -110,6 +118,7 @@ export const getShops = catchAsync(async (req, res) => {
       description: shop?.description || "",
       address: shop?.address || seller.address || "",
       deliveryArea: shop?.deliveryArea || "",
+      deliveryFee: shop?.deliveryFee ?? 5,
       shopStatus: shop?.shopStatus || "not verified",
       owner: {
         _id: seller._id,

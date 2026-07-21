@@ -8,10 +8,12 @@ import cartRoute from "../route/cart.route.js";
 import couponRoute from "../route/coupon.route.js";
 import notificationRoute from "../route/notification.route.js";
 import orderRoute from "../route/order.route.js";
+import paymentRoute from "../route/payment.route.js";
 import categoryRoute from "../route/product.category.route.js";
 import shopRoute from "../route/shop.route.js";
 import wishlistRoute from "../route/wishlist.route.js";
 import dashboardRoute from "../route/dashboard.route.js";
+import adminSettingsRoute from "../route/adminSettings.route.js";
 
 const router = express.Router();
 
@@ -23,9 +25,11 @@ router.use("/cart", cartRoute);
 router.use("/coupon", couponRoute);
 router.use("/notification", notificationRoute);
 router.use("/order", orderRoute);
+router.use("/payment", paymentRoute);
 router.use("/category", categoryRoute);
 router.use("/shop", shopRoute);
 router.use("/wishlist", wishlistRoute);
 router.use("/dashboard", dashboardRoute);
+router.use("/admin-settings", adminSettingsRoute);
 
 export default router;

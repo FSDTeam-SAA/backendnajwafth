@@ -1,11 +1,14 @@
 import httpStatus from "http-status";
+import mongoose from "mongoose";
 import { Book } from "../model/book.model.js";
 import { DriverRequest } from "../model/driveReq.model.js";
 import { Order } from "../model/order.model.js";
+import { paymentInfo } from "../model/payment.model.js";
 import { Shop } from "../model/shop.model.js";
 import { User } from "../model/user.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
+import { getAdminCommissionRate } from "../utils/adminSettings.js";
 
 const buildMonthlyDeliveryActivity = (orders = []) => {
   const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -90,6 +93,11 @@ export const getSellerOverview = catchAsync(async (req, res) => {
     (sum, order) => sum + (order.totalAmount || 0),
     0,
   );
+  const totalAdminCommission = completedOrders.reduce(
+    (sum, order) => sum + (order.adminCommission || 0),
+    0,
+  );
+  const netRevenue = totalRevenue - totalAdminCommission;
   const ordersToday = allSellerOrders.filter(
     (order) => new Date(order.createdAt) >= startOfToday,
   ).length;
@@ -110,6 +118,8 @@ export const getSellerOverview = catchAsync(async (req, res) => {
         totalUsers: totalCustomers,
         totalCompletedOrders: completedOrders.length,
         totalRevenue: Number(totalRevenue.toFixed(2)),
+        totalAdminCommission: Number(totalAdminCommission.toFixed(2)),
+        netRevenue: Number(netRevenue.toFixed(2)),
       },
       salesAnalysis: buildWeeklyRevenue(allSellerOrders),
       recentOrders,
@@ -173,6 +183,102 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
       recentDriverRequests,
       recentShops,
       recentDrivers: drivers,
+    },
+  });
+});
+
+export const getAdminProfitOverview = catchAsync(async (req, res) => {
+  const page = Number(req.query.page || 1);
+  const limit = Number(req.query.limit || 10);
+  const skip = (page - 1) * limit;
+  const currentCommissionRate = await getAdminCommissionRate();
+  const completedPayments = await paymentInfo
+    .find({ type: "order", paymentStatus: "complete", orderId: { $ne: null } })
+    .sort({ createdAt: -1 })
+    .select("orderId price adminCommission adminCommissionRate paymentMethod paymentStatus transactionId")
+    .lean();
+  const paymentByOrderId = new Map();
+
+  for (const payment of completedPayments) {
+    const key = payment.orderId?.toString();
+    if (key && !paymentByOrderId.has(key)) {
+      paymentByOrderId.set(key, payment);
+    }
+  }
+
+  const paidOrderIds = Array.from(paymentByOrderId.keys()).map((id) => new mongoose.Types.ObjectId(id));
+  const paidOrderFilter = { _id: { $in: paidOrderIds } };
+
+  const [orders, total, allPaidOrders] = await Promise.all([
+    Order.find(paidOrderFilter)
+      .populate("customer", "name email phone")
+      .populate("vendor", "name email phone")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    Order.countDocuments(paidOrderFilter),
+    Order.find(paidOrderFilter).select("totalAmount adminCommission adminCommissionRate"),
+  ]);
+
+  const getSavedCommission = (orderData, payment) => {
+    if (typeof orderData.adminCommission === "number" && orderData.adminCommission > 0) {
+      return Number(orderData.adminCommission.toFixed(2));
+    }
+    if (typeof payment?.adminCommission === "number" && payment.adminCommission > 0) {
+      return Number(payment.adminCommission.toFixed(2));
+    }
+
+    const savedRate = Number(orderData.adminCommissionRate ?? payment?.adminCommissionRate ?? currentCommissionRate);
+    return Number(((orderData.totalAmount || 0) * (savedRate / 100)).toFixed(2));
+  };
+
+  const totalOrderAmount = Number(
+    allPaidOrders.reduce((sum, order) => sum + (order.totalAmount || 0), 0).toFixed(2),
+  );
+  const totalCommission = Number(
+    allPaidOrders
+      .reduce((sum, order) => {
+        const orderData = order.toObject();
+        const payment = paymentByOrderId.get(orderData._id.toString());
+        return sum + getSavedCommission(orderData, payment);
+      }, 0)
+      .toFixed(2),
+  );
+  const mappedOrders = orders.map((order) => {
+    const orderData = order.toObject();
+    const payment = paymentByOrderId.get(orderData._id.toString());
+    const orderCommissionRate = Number(orderData.adminCommissionRate ?? payment?.adminCommissionRate ?? currentCommissionRate);
+    const orderCommission = getSavedCommission(orderData, payment);
+
+    return {
+      ...orderData,
+      payment,
+      paymentStatus: payment?.paymentStatus || "complete",
+      paymentMethod: payment?.paymentMethod || "Stripe",
+      adminCommissionRate: orderCommissionRate,
+      adminCommission: orderCommission,
+    };
+  });
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Admin profit overview fetched successfully",
+    data: {
+      metrics: {
+        totalOrders: total,
+        totalOrderAmount,
+        totalCommission,
+        adminTotalProfit: totalCommission,
+        adminCommissionRate: currentCommissionRate,
+      },
+      orders: mappedOrders,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
     },
   });
 });

@@ -37,9 +37,22 @@ const orderSchema = new Schema(
       type: Number,
       default: 0,
     },
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "paid", "pending", "complete", "failed"],
+      default: "pending",
+    },
+    adminCommissionRate: {
+      type: Number,
+      default: 15,
+    },
+    adminCommission: {
+      type: Number,
+      default: 0,
+    },
     status: {
       type: String,
-      enum: ["pending", "in_progress", "shipped", "delivered", "cancelled"],
+      enum: ["pending", "processing", "picked", "delivered"],
       default: "pending",
     },
     trackingNumber: {
@@ -60,6 +73,21 @@ const orderSchema = new Schema(
     },
     address: {
       type: String,
+    },
+    // Recipient contact + structured delivery address captured at checkout.
+    recipientName: {
+      type: String,
+    },
+    phone: {
+      type: String,
+    },
+    addressDetails: {
+      line1: { type: String },
+      line2: { type: String },
+      city: { type: String },
+      postalCode: { type: String },
+      state: { type: String },
+      country: { type: String },
     },
     coupon: {
       type: Schema.Types.ObjectId,

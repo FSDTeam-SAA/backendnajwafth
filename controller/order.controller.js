@@ -1,15 +1,37 @@
 import httpStatus from "http-status";
 import mongoose from "mongoose";
 import { Order as OrderModel } from "../model/order.model.js";
+import { paymentInfo } from "../model/payment.model.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { nanoid } from "nanoid";
 
 import { Book } from "../model/book.model.js";
+import { Shop } from "../model/shop.model.js";
 import { createNotification, getUserDisplayName } from "../utils/notification.js";
+import { getAdminCommissionRate } from "../utils/adminSettings.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
+
+const orderStatusAliases = {
+  in_progress: "processing",
+  shipped: "picked",
+};
+
+const orderStatuses = new Set(["pending", "processing", "picked", "delivered"]);
+
+const normalizeOrderStatus = (status = "pending") => {
+  const normalized = orderStatusAliases[status] || status;
+  return orderStatuses.has(normalized) ? normalized : "pending";
+};
+
+const getOrderStatusFilter = (status) => {
+  const normalized = normalizeOrderStatus(status);
+  if (normalized === "processing") return { $in: ["processing", "in_progress"] };
+  if (normalized === "picked") return { $in: ["picked", "shipped"] };
+  return normalized;
+};
 
 const parseRequestedQuantity = (value) => {
   const quantity = Number(value || 0);
@@ -21,8 +43,48 @@ const parseRequestedQuantity = (value) => {
   return quantity;
 };
 
+const normalizePaymentStatus = (orderStatus, paymentStatus) => {
+  if (paymentStatus === "complete") return "complete";
+  if (paymentStatus === "failed") return "failed";
+  return orderStatus || paymentStatus || "pending";
+};
+
+const attachPaymentDetails = (order, payment) => {
+  const orderData = typeof order.toObject === "function" ? order.toObject() : order;
+  const paymentStatus = normalizePaymentStatus(orderData.paymentStatus, payment?.paymentStatus);
+  const status = normalizeOrderStatus(orderData.status);
+
+  return {
+    ...orderData,
+    status,
+    payment: payment || null,
+    paymentMethod: payment?.paymentMethod || orderData.paymentMethod || (payment ? "Stripe" : ""),
+    paymentStatus,
+  };
+};
+
+const getLatestPaymentsByOrderId = async (orderIds) => {
+  if (orderIds.length === 0) return new Map();
+
+  const payments = await paymentInfo
+    .find({ orderId: { $in: orderIds }, type: "order" })
+    .sort({ createdAt: -1 })
+    .select("orderId paymentMethod paymentStatus transactionId price")
+    .lean();
+
+  const paymentByOrderId = new Map();
+  for (const payment of payments) {
+    const key = payment.orderId?.toString();
+    if (key && !paymentByOrderId.has(key)) {
+      paymentByOrderId.set(key, payment);
+    }
+  }
+
+  return paymentByOrderId;
+};
+
 export const createOrder = catchAsync(async (req, res) => {
-  const { items, address } = req.body;
+  const { items, address, name, phone, addressDetails } = req.body;
   const customer = req.user._id;
 
   let totalAmount = 0;
@@ -48,14 +110,25 @@ export const createOrder = catchAsync(async (req, res) => {
 
   const orderId = `ORD${nanoid(6)}`;
   console.log("Creating order with ID:", orderItems, "for customer:", customer);
+  const vendor = orderItems[0].vendor;
+  const shop = await Shop.findOne({ owner: vendor }).select("deliveryFee");
+  const shippingFee = Number(shop?.deliveryFee ?? 5);
+  const adminCommissionRate = await getAdminCommissionRate();
+  const adminCommission = Number((totalAmount * (adminCommissionRate / 100)).toFixed(2));
 
   const order = await OrderModel.create({
     orderId,
     items: orderItems,
     totalAmount,
+    shippingFee,
+    adminCommissionRate,
+    adminCommission,
     customer,
-    vendor: orderItems[0].vendor,
+    vendor,
     address,
+    recipientName: name,
+    phone,
+    addressDetails,
     expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
@@ -99,7 +172,7 @@ export const getOrders = catchAsync(async (req, res) => {
   const pageNum = Number(page);
   const limitNum = Number(limit);
   const query = { customer: req.user._id };
-  if (status) query.status = status;
+  if (status) query.status = getOrderStatusFilter(status);
 
   if (req.user.role === "seller") {
     query.vendor = req.user._id;
@@ -121,13 +194,17 @@ export const getOrders = catchAsync(async (req, res) => {
       .sort({ createdAt: -1 }),
     OrderModel.countDocuments(query),
   ]);
+  const paymentByOrderId = await getLatestPaymentsByOrderId(orders.map((order) => order._id));
+  const ordersWithPayment = orders.map((order) =>
+    attachPaymentDetails(order, paymentByOrderId.get(order._id.toString())),
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Orders fetched",
     data: {
-      orders,
+      orders: ordersWithPayment,
       pagination: {
         total,
         page: pageNum,
@@ -159,11 +236,17 @@ export const getOrderById = catchAsync(async (req, res) => {
     throw new AppError(httpStatus.FORBIDDEN, "Access denied");
   }
 
+  const payment = await paymentInfo
+    .findOne({ orderId: order._id, type: "order" })
+    .sort({ createdAt: -1 })
+    .select("paymentMethod paymentStatus transactionId price")
+    .lean();
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Order fetched",
-    data: order,
+    data: attachPaymentDetails(order, payment),
   });
 });
 
@@ -193,7 +276,9 @@ export const updateOrderStatus = catchAsync(async (req, res) => {
   }
 
   if (status !== undefined) {
-    order.status = status;
+    order.status = normalizeOrderStatus(status);
+  } else {
+    order.status = normalizeOrderStatus(order.status);
   }
 
   if (trackingNumber !== undefined) {
@@ -248,6 +333,36 @@ export const updateOrderStatus = catchAsync(async (req, res) => {
   });
 });
 
+// Returns the recipient + delivery address from the user's most recent order
+// so the checkout form can pre-fill it next time.
+export const getLastAddress = catchAsync(async (req, res) => {
+  const lastOrder = await OrderModel.findOne({
+    customer: req.user._id,
+    $or: [
+      { recipientName: { $exists: true, $ne: "" } },
+      { "addressDetails.line1": { $exists: true, $ne: "" } },
+      { address: { $exists: true, $ne: "" } },
+    ],
+  })
+    .sort({ createdAt: -1 })
+    .select("recipientName phone address addressDetails")
+    .lean();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: lastOrder ? "Last address fetched" : "No saved address",
+    data: lastOrder
+      ? {
+          name: lastOrder.recipientName || "",
+          phone: lastOrder.phone || "",
+          address: lastOrder.address || "",
+          addressDetails: lastOrder.addressDetails || {},
+        }
+      : null,
+  });
+});
+
 export const getMyOrders = catchAsync(async (req, res) => {
   const { page = 1, limit = 10 } = req.query;
   const pageNum = Number(page);
@@ -255,7 +370,7 @@ export const getMyOrders = catchAsync(async (req, res) => {
   const skip = (pageNum - 1) * limitNum;
   const filter = {
     customer: req.user._id,
-    status: { $in: ["pending", "in_progress", "shipped", "delivered"] },
+    status: { $in: ["pending", "processing", "picked", "delivered", "in_progress", "shipped"] },
   };
 
   const [orders, total] = await Promise.all([
@@ -268,13 +383,17 @@ export const getMyOrders = catchAsync(async (req, res) => {
       .limit(limitNum),
     OrderModel.countDocuments(filter),
   ]);
+  const paymentByOrderId = await getLatestPaymentsByOrderId(orders.map((order) => order._id));
+  const ordersWithPayment = orders.map((order) =>
+    attachPaymentDetails(order, paymentByOrderId.get(order._id.toString())),
+  );
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "Orders fetched",
     data: {
-      orders,
+      orders: ordersWithPayment,
       pagination: {
         total,
         page: pageNum,

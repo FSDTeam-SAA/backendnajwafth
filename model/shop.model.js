@@ -23,6 +23,11 @@ const shopSchema = new Schema({
   deliveryArea: {
     type: String,
   },
+  deliveryFee: {
+    type: Number,
+    default: 5,
+    min: [0, "Delivery fee cannot be negative"],
+  },
   products: [
     {
       type: Schema.Types.ObjectId,

@@ -37,6 +37,10 @@ const paymentInfoSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    adminCommissionRate: {
+      type: Number,
+      default: 15,
+    },
   },
   {
     timestamps: true,
