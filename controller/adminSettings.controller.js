@@ -17,15 +17,31 @@ export const getSettings = catchAsync(async (_req, res) => {
 });
 
 export const updateSettings = catchAsync(async (req, res) => {
-  const rate = Number(req.body.adminCommissionRate);
+  const updates = { key: "global" };
 
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Admin commission must be between 0 and 100");
+  if (req.body.adminCommissionRate !== undefined) {
+    const rate = Number(req.body.adminCommissionRate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Admin commission must be between 0 and 100");
+    }
+    updates.adminCommissionRate = rate;
+  }
+
+  if (req.body.deliveryFee !== undefined) {
+    const deliveryFee = Number(req.body.deliveryFee);
+    if (!Number.isFinite(deliveryFee) || deliveryFee < 0) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Delivery fee cannot be negative");
+    }
+    updates.deliveryFee = deliveryFee;
+  }
+
+  if (updates.adminCommissionRate === undefined && updates.deliveryFee === undefined) {
+    throw new AppError(httpStatus.BAD_REQUEST, "No valid settings provided");
   }
 
   const settings = await AdminSettings.findOneAndUpdate(
     { key: "global" },
-    { key: "global", adminCommissionRate: rate },
+    updates,
     { new: true, upsert: true, runValidators: true },
   );
 

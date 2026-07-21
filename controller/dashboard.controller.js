@@ -75,13 +75,12 @@ export const getSellerOverview = catchAsync(async (req, res) => {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
 
-  const [bookCount, allSellerOrders, completedOrders, recentOrders] = await Promise.all([
+  const [bookCount, allSellerOrders, recentOrders] = await Promise.all([
     Book.countDocuments({ shopId: sellerId }),
     Order.find({ vendor: sellerId })
       .populate("customer", "name email phone avatar")
       .populate("items.product", "title author price coverImage category")
       .sort({ createdAt: -1 }),
-    Order.find({ vendor: sellerId, status: "delivered" }),
     Order.find({ vendor: sellerId })
       .populate("customer", "name email phone avatar")
       .populate("items.product", "title author price coverImage category")
@@ -89,12 +88,19 @@ export const getSellerOverview = catchAsync(async (req, res) => {
       .limit(8),
   ]);
 
-  const totalRevenue = completedOrders.reduce(
+  const deliveredOrders = allSellerOrders.filter((order) => order.status === "delivered");
+  const totalRevenue = allSellerOrders.reduce(
     (sum, order) => sum + (order.totalAmount || 0),
     0,
   );
-  const totalAdminCommission = completedOrders.reduce(
-    (sum, order) => sum + (order.adminCommission || 0),
+  const totalAdminCommission = allSellerOrders.reduce(
+    (sum, order) => {
+      if (typeof order.adminCommission === "number" && order.adminCommission > 0) {
+        return sum + order.adminCommission;
+      }
+      const commissionRate = Number(order.adminCommissionRate ?? 0);
+      return sum + ((order.totalAmount || 0) * (commissionRate / 100));
+    },
     0,
   );
   const netRevenue = totalRevenue - totalAdminCommission;
@@ -116,7 +122,7 @@ export const getSellerOverview = catchAsync(async (req, res) => {
         totalOrders: allSellerOrders.length,
         ordersToday,
         totalUsers: totalCustomers,
-        totalCompletedOrders: completedOrders.length,
+        totalCompletedOrders: deliveredOrders.length,
         totalRevenue: Number(totalRevenue.toFixed(2)),
         totalAdminCommission: Number(totalAdminCommission.toFixed(2)),
         netRevenue: Number(netRevenue.toFixed(2)),

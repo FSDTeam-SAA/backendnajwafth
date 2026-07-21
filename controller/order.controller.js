@@ -8,9 +8,8 @@ import catchAsync from "../utils/catchAsync.js";
 import { nanoid } from "nanoid";
 
 import { Book } from "../model/book.model.js";
-import { Shop } from "../model/shop.model.js";
 import { createNotification, getUserDisplayName } from "../utils/notification.js";
-import { getAdminCommissionRate } from "../utils/adminSettings.js";
+import { getAdminCommissionRate, getDeliveryFee } from "../utils/adminSettings.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
@@ -111,9 +110,10 @@ export const createOrder = catchAsync(async (req, res) => {
   const orderId = `ORD${nanoid(6)}`;
   console.log("Creating order with ID:", orderItems, "for customer:", customer);
   const vendor = orderItems[0].vendor;
-  const shop = await Shop.findOne({ owner: vendor }).select("deliveryFee");
-  const shippingFee = Number(shop?.deliveryFee ?? 5);
-  const adminCommissionRate = await getAdminCommissionRate();
+  const [shippingFee, adminCommissionRate] = await Promise.all([
+    getDeliveryFee(),
+    getAdminCommissionRate(),
+  ]);
   const adminCommission = Number((totalAmount * (adminCommissionRate / 100)).toFixed(2));
 
   const order = await OrderModel.create({

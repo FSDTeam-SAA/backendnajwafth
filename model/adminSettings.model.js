@@ -14,6 +14,11 @@ const adminSettingsSchema = new Schema(
       min: [0, "Admin commission cannot be negative"],
       max: [100, "Admin commission cannot be greater than 100"],
     },
+    deliveryFee: {
+      type: Number,
+      default: 5,
+      min: [0, "Delivery fee cannot be negative"],
+    },
   },
   { timestamps: true },
 );
