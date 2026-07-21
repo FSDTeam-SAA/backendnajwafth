@@ -1,5 +1,6 @@
 import { Notification } from "../model/notification.model.js";
 import { User } from "../model/user.model.js";
+import { sendPushToUser } from "./push.js";
 // import { getIO, getNotificationRoom } from "./socket.js";
 
 const normalizeIds = (ids = []) => {
@@ -128,9 +129,22 @@ export const createNotification = async ({
     })),
   );
 
-  // await Promise.all(notifications.map((notification) => emitNotificationCreated(notification)));
-  await Promise.all(notifications.map((notification) => {}));
-  
+  // Best-effort FCM push to each recipient's registered devices. sendPushToUser
+  // never throws, so a push failure cannot break the in-app notification flow.
+  await Promise.all(
+    notifications.map((notification) =>
+      sendPushToUser(notification.user, {
+        title,
+        body: message,
+        data: {
+          type,
+          notificationId: notification._id.toString(),
+          ...metadata,
+        },
+      }),
+    ),
+  );
+
   return notifications;
 };
 

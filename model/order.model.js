@@ -61,6 +61,21 @@ const orderSchema = new Schema(
     address: {
       type: String,
     },
+    // Recipient contact + structured delivery address captured at checkout.
+    recipientName: {
+      type: String,
+    },
+    phone: {
+      type: String,
+    },
+    addressDetails: {
+      line1: { type: String },
+      line2: { type: String },
+      city: { type: String },
+      postalCode: { type: String },
+      state: { type: String },
+      country: { type: String },
+    },
     coupon: {
       type: Schema.Types.ObjectId,
       ref: "Coupon",

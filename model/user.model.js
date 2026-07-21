@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: "" },
     credit: { type: Number, default: null },
     dob: { type: Date },
+    age: { type: Number, min: 0 },
+    fcmTokens: { type: [String], default: [] },
     gender: {
       type: String,
       enum: ["male", "female", "other"],

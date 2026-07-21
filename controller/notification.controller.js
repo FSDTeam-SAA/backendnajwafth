@@ -2,6 +2,7 @@ import httpStatus from "http-status";
 import mongoose from "mongoose";
 import AppError from "../errors/AppError.js";
 import { Notification } from "../model/notification.model.js";
+import { User } from "../model/user.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
 // import {
@@ -144,5 +145,57 @@ export const markAllNotificationsAsRead = catchAsync(async (req, res) => {
     data: {
       modifiedCount: result.modifiedCount,
     },
+  });
+});
+
+// Register an FCM device token for the authenticated user so the server can
+// send push notifications to this device. Idempotent ($addToSet).
+export const registerDeviceToken = catchAsync(async (req, res) => {
+  const { token } = req.body;
+
+  if (!token || typeof token !== "string" || !token.trim()) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Device token is required");
+  }
+
+  const deviceToken = token.trim();
+
+  // A token identifies a device, not a user — if another account on this
+  // device registered it earlier, move it to the current user.
+  await User.updateMany(
+    { _id: { $ne: req.user._id }, fcmTokens: deviceToken },
+    { $pull: { fcmTokens: deviceToken } },
+  );
+
+  await User.updateOne(
+    { _id: req.user._id },
+    { $addToSet: { fcmTokens: deviceToken } },
+  );
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Device token registered",
+    data: null,
+  });
+});
+
+// Remove an FCM device token (called on logout).
+export const removeDeviceToken = catchAsync(async (req, res) => {
+  const { token } = req.body;
+
+  if (!token || typeof token !== "string" || !token.trim()) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Device token is required");
+  }
+
+  await User.updateOne(
+    { _id: req.user._id },
+    { $pull: { fcmTokens: token.trim() } },
+  );
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Device token removed",
+    data: null,
   });
 });

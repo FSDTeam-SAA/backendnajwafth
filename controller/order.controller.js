@@ -22,7 +22,7 @@ const parseRequestedQuantity = (value) => {
 };
 
 export const createOrder = catchAsync(async (req, res) => {
-  const { items, address } = req.body;
+  const { items, address, name, phone, addressDetails } = req.body;
   const customer = req.user._id;
 
   let totalAmount = 0;
@@ -56,6 +56,9 @@ export const createOrder = catchAsync(async (req, res) => {
     customer,
     vendor: orderItems[0].vendor,
     address,
+    recipientName: name,
+    phone,
+    addressDetails,
     expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
@@ -245,6 +248,36 @@ export const updateOrderStatus = catchAsync(async (req, res) => {
     success: true,
     message: "Order status updated",
     data: order,
+  });
+});
+
+// Returns the recipient + delivery address from the user's most recent order
+// so the checkout form can pre-fill it next time.
+export const getLastAddress = catchAsync(async (req, res) => {
+  const lastOrder = await OrderModel.findOne({
+    customer: req.user._id,
+    $or: [
+      { recipientName: { $exists: true, $ne: "" } },
+      { "addressDetails.line1": { $exists: true, $ne: "" } },
+      { address: { $exists: true, $ne: "" } },
+    ],
+  })
+    .sort({ createdAt: -1 })
+    .select("recipientName phone address addressDetails")
+    .lean();
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: lastOrder ? "Last address fetched" : "No saved address",
+    data: lastOrder
+      ? {
+          name: lastOrder.recipientName || "",
+          phone: lastOrder.phone || "",
+          address: lastOrder.address || "",
+          addressDetails: lastOrder.addressDetails || {},
+        }
+      : null,
   });
 });
 
