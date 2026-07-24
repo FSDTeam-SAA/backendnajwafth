@@ -28,7 +28,20 @@ export const getProfile = catchAsync(async (req, res) => {
 
 // Update profile
 export const updateProfile = catchAsync(async (req, res) => {
-  const { name, email, phone, bio, gender, dob, age, address } = req.body;
+  const {
+    name,
+    email,
+    phone,
+    bio,
+    gender,
+    dob,
+    age,
+    address,
+    driverId,
+    entrepreneurStatus,
+    vehicleType,
+    vehiclePlateNumber,
+  } = req.body;
 
   const userId = req.user._id;
 
@@ -50,8 +63,18 @@ export const updateProfile = catchAsync(async (req, res) => {
     user.email = email;
   }
   if (phone !== undefined) user.phone = phone;
+  if (driverId !== undefined) user.driverId = driverId;
+  if (entrepreneurStatus !== undefined) {
+    user.entrepreneurStatus = entrepreneurStatus;
+  }
+  if (vehicleType !== undefined) user.vehicleType = vehicleType;
+  if (vehiclePlateNumber !== undefined) {
+    user.vehiclePlateNumber = vehiclePlateNumber;
+  }
   if (bio !== undefined) user.bio = bio;
-  if (gender !== undefined && gender !== "") user.gender = gender;
+  if (gender !== undefined && gender !== "") {
+    user.gender = String(gender).toLowerCase();
+  }
   if (dob !== undefined && dob !== "") {
     const parsedDob = new Date(dob);
     if (Number.isNaN(parsedDob.getTime())) {
