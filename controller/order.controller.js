@@ -275,6 +275,13 @@ export const updateOrderStatus = catchAsync(async (req, res) => {
     throw new AppError(httpStatus.FORBIDDEN, "Access denied");
   }
 
+  if (
+    req.user.role === "driver" &&
+    order.driver?.toString() !== req.user._id.toString()
+  ) {
+    throw new AppError(httpStatus.FORBIDDEN, "Access denied");
+  }
+
   if (status !== undefined) {
     order.status = normalizeOrderStatus(status);
   } else {

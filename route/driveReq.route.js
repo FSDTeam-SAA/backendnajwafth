@@ -1,6 +1,6 @@
 import express from "express";
 import { createDriverRequest, deleteDriverRequest, getAllDriverRequests, getShopDriverRequests, getSingleDriverRequest, updateDriverRequest, assignDriverToRequest, updateDriverRequestStatus, getDriverRequestsByDriver } from "../controller/driverReq.controller.js";
-import { isAdmin, isSeller, protect } from "../middleware/auth.middleware.js";
+import { isSeller, protect } from "../middleware/auth.middleware.js";
 
 
 const router = express.Router();
@@ -13,16 +13,16 @@ router.get("/driver-requests", protect, getAllDriverRequests);
 
 router.get("/driver-requests/shop/:shopId", protect, getShopDriverRequests);
 
+router.get("/driver-requests/driver/:driverId", protect, getDriverRequestsByDriver);
+
 router.get("/driver-requests/:id", protect, getSingleDriverRequest);
 
 router.patch("/driver-requests/:id", protect, updateDriverRequest);
 
 router.delete("/driver-requests/:id", protect, deleteDriverRequest);
 
-router.get("/driver-requests/driver/:driverId", protect, getDriverRequestsByDriver);
+router.patch ("/driver-requests/:id/assign-driver", protect, assignDriverToRequest);
 
-router.patch ("/driver-requests/:id/assign-driver", protect, isAdmin, assignDriverToRequest);
-
-router.patch("/driver-requests/:id/update-status", protect, isAdmin, updateDriverRequestStatus);
+router.patch("/driver-requests/:id/update-status", protect, updateDriverRequestStatus);
 
 export default router;
