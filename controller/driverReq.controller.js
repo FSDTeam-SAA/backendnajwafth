@@ -94,6 +94,12 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
     filter.shopId = shopId;
   }
 
+  if (req.user.role === "driver") {
+    filter.status = "pending";
+    filter.dismissedDrivers = { $ne: req.user._id };
+    filter.$or = [{ driver: { $exists: false } }, { driver: null }];
+  }
+
   const skip = (Number(page) - 1) * Number(limit);
 
   const [requests, total] = await Promise.all([
@@ -282,26 +288,45 @@ export const deleteDriverRequest = catchAsync(async (req, res, next) => {
 
 export const assignDriverToRequest = catchAsync(async (req, res, next) => {
   const { id } = req.params;
-  const { driverId } = req.body;
+  const driverId = req.user.role === "driver" ? req.user._id : req.body.driverId;
+
+  if (req.user.role !== "admin" && req.user.role !== "driver") {
+    return next(new AppError(403, "Only admin or driver can assign a driver"));
+  }
+
   if (!mongoose.Types.ObjectId.isValid(id) || !mongoose.Types.ObjectId.isValid(driverId)) {
     return next(new AppError(400, "Invalid request ID or driver ID"));
   }
 
-  const request = await DriverRequest.findByIdAndUpdate(
-    id,
-    { driver: driverId },
-    { new: true }
-  )
-    .populate("driver", "name email phone avatar")
-    .populate("orderId");
+  const request = await DriverRequest.findById(id);
   if (!request) {
     return next(new AppError(404, "Driver request not found"));
   }
+
+  if (
+    req.user.role === "driver" &&
+    request.driver &&
+    request.driver.toString() !== req.user._id.toString()
+  ) {
+    return next(new AppError(409, "Driver request is already assigned"));
+  }
+
+  if (req.user.role === "driver" && request.status !== "pending") {
+    return next(new AppError(400, "Only pending requests can be claimed"));
+  }
+
+  request.driver = driverId;
+  await request.save();
+
+  const updatedRequest = await DriverRequest.findById(request._id)
+    .populate("driver", "name email phone avatar")
+    .populate("orderId");
+
   return sendResponse(res, {
     statusCode: 200,
     success: true,
     message: "Driver assigned to request successfully",
-    data: request,
+    data: updatedRequest,
   });
 });
 
@@ -320,6 +345,40 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
     return next(new AppError(404, "Driver request not found"));
   }
 
+  if (req.user.role !== "admin" && req.user.role !== "driver") {
+    return next(new AppError(403, "Only admin or driver can update status"));
+  }
+
+  if (req.user.role === "driver") {
+    if (
+      request.driver &&
+      request.driver.toString() !== req.user._id.toString()
+    ) {
+      return next(new AppError(403, "Access denied"));
+    }
+
+    if (status === "rejected") {
+      await DriverRequest.findByIdAndUpdate(id, {
+        $addToSet: { dismissedDrivers: req.user._id },
+      });
+
+      const updatedRequest = await DriverRequest.findById(id)
+        .populate("driver", "name email phone avatar")
+        .populate("orderId");
+
+      return sendResponse(res, {
+        statusCode: 200,
+        success: true,
+        message: "Driver request skipped successfully",
+        data: updatedRequest,
+      });
+    }
+
+    if (!request.driver && status === "accepted") {
+      request.driver = req.user._id;
+    }
+  }
+
   if (status === "accepted") {
     const order = await Order.findById(request.orderId);
     if (order) {
@@ -327,11 +386,14 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
       await order.save();
     }
   }
-  const updatedRequest = await DriverRequest.findByIdAndUpdate(
-    id,
-    { status },
-    { new: true }
-  );
+
+  request.status = status;
+  await request.save();
+
+  const updatedRequest = await DriverRequest.findById(id)
+    .populate("driver", "name email phone avatar")
+    .populate("orderId");
+
   return sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -356,6 +418,3 @@ export const getDriverRequestsByDriver = catchAsync(async (req, res, next) => {
     data: requests,
   });
 });
-
-
-
