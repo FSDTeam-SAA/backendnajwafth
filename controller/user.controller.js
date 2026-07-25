@@ -8,6 +8,7 @@ import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 import { Review } from "../model/review.model.js";
+import { Notification } from "../model/notification.model.js";
 
 // Get user profile
 export const getProfile = catchAsync(async (req, res) => {
@@ -283,6 +284,25 @@ export const getAdminDrivers = catchAsync(async (_req, res) => {
 export const deleteOwnAccount = catchAsync(async (req, res) => {
   const userId = req.user._id;
 
+  await Promise.all([
+    DriverRequest.updateMany(
+      { driver: userId, status: "accepted" },
+      { $unset: { driver: 1 }, $set: { status: "pending" } },
+    ),
+    DriverRequest.updateMany(
+      { driver: userId, status: { $ne: "accepted" } },
+      { $unset: { driver: 1 } },
+    ),
+    DriverRequest.updateMany(
+      { dismissedDrivers: userId },
+      { $pull: { dismissedDrivers: userId } },
+    ),
+    Order.updateMany({ driver: userId }, { $unset: { driver: 1 } }),
+    Notification.deleteMany({
+      $or: [{ user: userId }, { actor: userId }],
+    }),
+  ]);
+
   const user = await User.findByIdAndDelete(userId);
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
@@ -291,7 +311,7 @@ export const deleteOwnAccount = catchAsync(async (req, res) => {
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Account and all associated data deleted successfully",
+    message: "Account and personal profile data deleted successfully",
     data: null,
   });
 });

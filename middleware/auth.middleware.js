@@ -49,6 +49,13 @@ export const isSeller = catchAsync(async (req, res, next) => {
   next();
 });
 
+export const isDriver = catchAsync(async (req, res, next) => {
+  if (req.user?.role !== "driver") {
+    throw new AppError(httpStatus.FORBIDDEN, "Access denied. Driver only.");
+  }
+  next();
+});
+
 export const isSpotOwner = catchAsync(async (req, res, next) => {
   if (req.user?.role !== "spotOwner") {
     throw new AppError(
@@ -58,4 +65,3 @@ export const isSpotOwner = catchAsync(async (req, res, next) => {
   }
   next();
 });
-
