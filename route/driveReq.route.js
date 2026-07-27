@@ -23,6 +23,16 @@ router.delete("/driver-requests/:id", protect, deleteDriverRequest);
 
 router.patch ("/driver-requests/:id/assign-driver", protect, assignDriverToRequest);
 
+router.patch("/driver-requests/:id/accept", protect, (req, res, next) => {
+  req.body.status = "accepted";
+  return updateDriverRequestStatus(req, res, next);
+});
+
+router.patch("/driver-requests/:id/reject", protect, (req, res, next) => {
+  req.body.status = "rejected";
+  return updateDriverRequestStatus(req, res, next);
+});
+
 router.patch("/driver-requests/:id/update-status", protect, updateDriverRequestStatus);
 
 export default router;

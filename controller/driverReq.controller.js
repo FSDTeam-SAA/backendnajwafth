@@ -76,33 +76,41 @@ export const createDriverRequest = catchAsync(async (req, res) => {
  * ADMIN - GET ALL DRIVER REQUESTS
  * Supports:
  * ?shopId=
+ * ?status=pending|accepted|rejected
  * ?page=1
  * ?limit=10
  */
 export const getAllDriverRequests = catchAsync(async (req, res) => {
   const {
     shopId,
+    status,
     page = 1,
     limit = 10,
   } = req.query;
 
   const filter = {};
+  const baseFilter = {};
 
   if (req.user.role === "seller") {
     filter.shopId = req.user._id;
+    baseFilter.shopId = req.user._id;
   } else if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
     filter.shopId = shopId;
+    baseFilter.shopId = shopId;
   }
 
   if (req.user.role === "driver") {
     filter.status = "pending";
     filter.dismissedDrivers = { $ne: req.user._id };
     filter.$or = [{ driver: { $exists: false } }, { driver: null }];
+    Object.assign(baseFilter, filter);
+  } else if (["pending", "accepted", "rejected"].includes(status)) {
+    filter.status = status;
   }
 
   const skip = (Number(page) - 1) * Number(limit);
 
-  const [requests, total] = await Promise.all([
+  const [requests, total, totalRequests, totalPending, totalCompleted] = await Promise.all([
     DriverRequest.find(filter)
       .populate("shopId", "name email")
       .populate("driver", "name email phone avatar")
@@ -112,6 +120,9 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
       .limit(Number(limit)),
 
     DriverRequest.countDocuments(filter),
+    DriverRequest.countDocuments(baseFilter),
+    DriverRequest.countDocuments({ ...baseFilter, status: "pending" }),
+    DriverRequest.countDocuments({ ...baseFilter, status: "accepted" }),
   ]);
 
   return sendResponse(res, {
@@ -122,8 +133,13 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
       page: Number(page),
       limit: Number(limit),
       total,
-      totalPage: Math.ceil(total / limit),
-       requests,
+      totalPage: Math.ceil(total / Number(limit)),
+      metrics: {
+        totalRequests,
+        totalPending,
+        totalCompleted,
+      },
+      requests,
     },
   });
 });
