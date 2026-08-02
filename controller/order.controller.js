@@ -10,6 +10,7 @@ import { nanoid } from "nanoid";
 import { Book } from "../model/book.model.js";
 import { createNotification, getUserDisplayName } from "../utils/notification.js";
 import { getAdminCommissionRate, getDeliveryFee } from "../utils/adminSettings.js";
+import { DriverRequest } from "../model/driveReq.model.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
@@ -293,6 +294,13 @@ export const updateOrderStatus = catchAsync(async (req, res) => {
   }
 
   await order.save();
+
+  if (order.status === "delivered") {
+    await DriverRequest.updateMany(
+      { orderId: order._id, status: "accepted" },
+      { $set: { status: "completed" } },
+    );
+  }
 
   const readableStatus = formatOrderStatus(order.status);
   const trackingMessage = order.trackingNumber

@@ -4,6 +4,32 @@ import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
 import { DriverRequest } from "../model/driveReq.model.js";
 import { Order } from "../model/order.model.js";
+import { User } from "../model/user.model.js";
+import {
+  createNotification,
+  notifyAdmins,
+  getUserDisplayName,
+} from "../utils/notification.js";
+
+const getOrderLabel = (request) =>
+  request.orderId?.orderId || request._id.toString();
+
+const activeDriverRequestStatuses = ["pending", "accepted"];
+
+const getAvailableDriverIds = async () => {
+  const busyDriverIds = await DriverRequest.distinct("driver", {
+    driver: { $exists: true, $ne: null },
+    status: { $in: activeDriverRequestStatuses },
+  });
+
+  const drivers = await User.find({
+    role: "driver",
+    isOnline: true,
+    _id: { $nin: busyDriverIds },
+  }).select("_id");
+
+  return drivers.map((driver) => driver._id);
+};
 
 
 /**
@@ -63,6 +89,30 @@ export const createDriverRequest = catchAsync(async (req, res) => {
     message,
   });
 
+  try {
+    const availableDriverIds = await getAvailableDriverIds();
+    if (availableDriverIds.length) {
+      const orderLabel =
+        typeof orderId === "string" && orderId.trim()
+          ? orderId.trim()
+          : driverRequest._id.toString();
+      await createNotification({
+        userIds: availableDriverIds,
+        actor: req.user._id,
+        order: resolvedOrderId || null,
+        type: "driver_request_new",
+        title: "New delivery request",
+        message: `A new delivery request is available from ${shopName || "a shop"}.`,
+        metadata: {
+          driverRequestId: driverRequest._id.toString(),
+          orderId: orderLabel,
+        },
+      });
+    }
+  } catch (error) {
+    console.warn("Failed to notify available drivers:", error.message);
+  }
+
   return sendResponse(res, {
     statusCode: 201,
     success: true,
@@ -102,9 +152,13 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
   if (req.user.role === "driver") {
     filter.status = "pending";
     filter.dismissedDrivers = { $ne: req.user._id };
-    filter.$or = [{ driver: { $exists: false } }, { driver: null }];
+    filter.$or = [
+      { driver: { $exists: false } },
+      { driver: null },
+      { driver: req.user._id },
+    ];
     Object.assign(baseFilter, filter);
-  } else if (["pending", "accepted", "rejected"].includes(status)) {
+  } else if (["pending", "accepted", "rejected", "completed"].includes(status)) {
     filter.status = status;
   }
 
@@ -122,7 +176,7 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
     DriverRequest.countDocuments(filter),
     DriverRequest.countDocuments(baseFilter),
     DriverRequest.countDocuments({ ...baseFilter, status: "pending" }),
-    DriverRequest.countDocuments({ ...baseFilter, status: "accepted" }),
+    DriverRequest.countDocuments({ ...baseFilter, status: "completed" }),
   ]);
 
   return sendResponse(res, {
@@ -331,12 +385,91 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
     return next(new AppError(400, "Only pending requests can be claimed"));
   }
 
-  request.driver = driverId;
-  await request.save();
+  const previousDriverId = request.driver?.toString();
+
+  if (req.user.role === "driver") {
+    if (!req.user.isOnline) {
+      return next(new AppError(409, "Go online before accepting requests"));
+    }
+
+    const existingWork = await DriverRequest.exists({
+      _id: { $ne: request._id },
+      driver: req.user._id,
+      status: { $in: activeDriverRequestStatuses },
+    });
+    if (existingWork) {
+      return next(new AppError(409, "Driver already has an active request"));
+    }
+
+    const claimed = await DriverRequest.findOneAndUpdate(
+      {
+        _id: request._id,
+        status: "pending",
+        $or: [
+          { driver: { $exists: false } },
+          { driver: null },
+          { driver: req.user._id },
+        ],
+      },
+      { $set: { driver: req.user._id } },
+      { new: true, runValidators: true },
+    );
+    if (!claimed) {
+      return next(new AppError(409, "Driver request is no longer available"));
+    }
+  } else if (previousDriverId !== driverId.toString()) {
+    const driver = await User.findOne({
+      _id: driverId,
+      role: "driver",
+      isOnline: true,
+    });
+    if (!driver) {
+      return next(new AppError(409, "Only online drivers can be assigned"));
+    }
+
+    const existingWork = await DriverRequest.exists({
+      _id: { $ne: request._id },
+      driver: driverId,
+      status: { $in: activeDriverRequestStatuses },
+    });
+    if (existingWork) {
+      return next(new AppError(409, "Driver already has an active request"));
+    }
+
+    request.driver = driverId;
+    await request.save();
+
+    if (request.status === "accepted" && request.orderId) {
+      await Order.findByIdAndUpdate(request.orderId, {
+        $set: { driver: driverId },
+      });
+    }
+  }
 
   const updatedRequest = await DriverRequest.findById(request._id)
     .populate("driver", "name email phone avatar")
     .populate("orderId");
+
+  if (req.user.role === "admin" && previousDriverId !== driverId.toString()) {
+    try {
+      await createNotification({
+        user: driverId,
+        actor: req.user._id,
+        order: updatedRequest.orderId?._id || null,
+        type: "driver_request_assigned",
+        title: "New delivery request assigned",
+        message: `You've been assigned a delivery for order ${getOrderLabel(
+          updatedRequest
+        )} from ${updatedRequest.shopName || "a shop"}. Open the app to accept or decline.`,
+        metadata: {
+          driverRequestId: updatedRequest._id.toString(),
+          orderId: getOrderLabel(updatedRequest),
+        },
+      });
+    } catch (error) {
+      console.warn("Failed to notify driver of assignment:", error.message);
+    }
+  }
 
   return sendResponse(res, {
     statusCode: 200,
@@ -353,7 +486,7 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return next(new AppError(400, "Invalid request ID"));
   }
-  if (!["pending", "accepted", "rejected"].includes(status)) {
+  if (!["pending", "accepted", "rejected", "completed"].includes(status)) {
     return next(new AppError(400, "Invalid status value"));
   }
   const request = await DriverRequest.findById(id);
@@ -366,21 +499,77 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
   }
 
   if (req.user.role === "driver") {
+    if (status === "completed") {
+      return next(
+        new AppError(
+          403,
+          "Delivery completion is controlled by the order status",
+        ),
+      );
+    }
+
     if (
       request.driver &&
       request.driver.toString() !== req.user._id.toString()
     ) {
-      return next(new AppError(403, "Access denied"));
+      return next(
+        new AppError(
+          status === "accepted" ? 409 : 403,
+          status === "accepted"
+            ? "Driver request is no longer available"
+            : "Access denied",
+        ),
+      );
     }
 
     if (status === "rejected") {
+      const rejectingDriver = request.driver
+        ? await User.findById(request.driver).select("name email")
+        : null;
+
       await DriverRequest.findByIdAndUpdate(id, {
         $addToSet: { dismissedDrivers: req.user._id },
+        $unset: { driver: 1 },
+        $set: { status: "pending" },
       });
 
       const updatedRequest = await DriverRequest.findById(id)
         .populate("driver", "name email phone avatar")
         .populate("orderId");
+
+      try {
+        const driverName = getUserDisplayName(rejectingDriver);
+        const orderLabel = getOrderLabel(updatedRequest);
+
+        await createNotification({
+          user: request.shopId,
+          actor: req.user._id,
+          order: updatedRequest.orderId?._id || null,
+          type: "driver_request_rejected",
+          title: "Driver declined delivery request",
+          message: `${driverName} declined the delivery for order ${orderLabel}. It has been returned to the pool for reassignment.`,
+          metadata: {
+            driverRequestId: updatedRequest._id.toString(),
+            orderId: orderLabel,
+          },
+        });
+
+        await notifyAdmins({
+          actor: req.user._id,
+          order: updatedRequest.orderId?._id || null,
+          type: "driver_request_rejected",
+          title: "Driver declined a delivery request",
+          message: `${driverName} declined delivery for order ${orderLabel} (shop: ${
+            updatedRequest.shopName || "unknown"
+          }). Please reassign a driver.`,
+          metadata: {
+            driverRequestId: updatedRequest._id.toString(),
+            orderId: orderLabel,
+          },
+        });
+      } catch (error) {
+        console.warn("Failed to notify of driver rejection:", error.message);
+      }
 
       return sendResponse(res, {
         statusCode: 200,
@@ -390,8 +579,40 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
       });
     }
 
-    if (!request.driver && status === "accepted") {
-      request.driver = req.user._id;
+    if (status === "accepted") {
+      if (!req.user.isOnline) {
+        return next(new AppError(409, "Go online before accepting requests"));
+      }
+
+      const existingWork = await DriverRequest.exists({
+        _id: { $ne: request._id },
+        driver: req.user._id,
+        status: { $in: activeDriverRequestStatuses },
+      });
+      if (existingWork) {
+        return next(new AppError(409, "Driver already has an active request"));
+      }
+
+      const acceptedRequest = await DriverRequest.findOneAndUpdate(
+        {
+          _id: request._id,
+          status: "pending",
+          $or: [
+            { driver: { $exists: false } },
+            { driver: null },
+            { driver: req.user._id },
+          ],
+        },
+        { $set: { driver: req.user._id, status: "accepted" } },
+        { new: true, runValidators: true },
+      );
+
+      if (!acceptedRequest) {
+        return next(new AppError(409, "Driver request is no longer available"));
+      }
+
+      request.driver = acceptedRequest.driver;
+      request.status = acceptedRequest.status;
     }
   }
 
@@ -403,19 +624,43 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
     }
   }
 
-  request.status = status;
-  await request.save();
+  if (!(req.user.role === "driver" && status === "accepted")) {
+    request.status = status;
+    await request.save();
+  }
 
   const updatedRequest = await DriverRequest.findById(id)
     .populate("driver", "name email phone avatar")
     .populate("orderId");
+
+  if (status === "accepted") {
+    try {
+      const driverName = getUserDisplayName(updatedRequest.driver);
+      const orderLabel = getOrderLabel(updatedRequest);
+
+      await createNotification({
+        user: request.shopId,
+        actor: updatedRequest.driver?._id || req.user._id,
+        order: updatedRequest.orderId?._id || null,
+        type: "driver_request_accepted",
+        title: "Driver accepted your delivery request",
+        message: `${driverName} has accepted the delivery for order ${orderLabel}.`,
+        metadata: {
+          driverRequestId: updatedRequest._id.toString(),
+          orderId: orderLabel,
+        },
+      });
+    } catch (error) {
+      console.warn("Failed to notify shop of driver acceptance:", error.message);
+    }
+  }
 
   return sendResponse(res, {
     statusCode: 200,
     success: true,
     message: "Driver request status updated successfully",
     data: updatedRequest,
-  }); 
+  });
 });
 
 export const getDriverRequestsByDriver = catchAsync(async (req, res, next) => {

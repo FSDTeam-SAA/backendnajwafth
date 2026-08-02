@@ -9,6 +9,7 @@ import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 import { Review } from "../model/review.model.js";
 import { Notification } from "../model/notification.model.js";
+import { getDriverAvailability } from "../utils/driverAvailability.js";
 
 // Get user profile
 export const getProfile = catchAsync(async (req, res) => {
@@ -23,6 +24,34 @@ export const getProfile = catchAsync(async (req, res) => {
     statusCode: httpStatus.OK,
     success: true,
     message: "Profile fetched successfully",
+    data: user,
+  });
+});
+
+export const updateDriverAvailability = catchAsync(async (req, res) => {
+  const { isOnline } = req.body;
+  if (typeof isOnline !== "boolean") {
+    throw new AppError(httpStatus.BAD_REQUEST, "isOnline must be a boolean");
+  }
+
+  const user = await User.findByIdAndUpdate(
+    req.user._id,
+    { $set: { isOnline } },
+    {
+      new: true,
+      runValidators: true,
+      projection: "-password -refreshToken -verificationInfo -password_reset_token",
+    },
+  );
+
+  if (!user) {
+    throw new AppError(httpStatus.NOT_FOUND, "User not found");
+  }
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: isOnline ? "Driver is online" : "Driver is offline",
     data: user,
   });
 });
@@ -267,7 +296,10 @@ export const getAdminDrivers = catchAsync(async (_req, res) => {
 
     return {
       ...driver.toObject(),
-      status: currentOrders > 0 ? "busy" : "available",
+      status: getDriverAvailability({
+        isOnline: driver.isOnline,
+        currentOrders,
+      }),
       currentOrders,
       completedDeliveries: completedMap.get(key) || 0,
     };

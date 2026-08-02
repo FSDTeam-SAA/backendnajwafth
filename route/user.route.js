@@ -12,6 +12,7 @@ import {
   changePassword,
   getSellerCustomers,
   getAdminDrivers,
+  updateDriverAvailability,
   achievement,
   deleteOwnAccount,
 } from "../controller/user.controller.js";
@@ -22,6 +23,12 @@ const router = express.Router();
 
 router.get("/me", protect, getProfile);
 router.patch("/me", protect, upload.single("avatar"), updateProfile);
+router.patch(
+  "/me/availability",
+  protect,
+  isDriver,
+  updateDriverAvailability,
+);
 router.delete("/me", protect, isDriver, deleteOwnAccount);
 router.patch("/change-password", protect, changePassword);
 router.get("/seller/customers", protect, isSeller, getSellerCustomers);

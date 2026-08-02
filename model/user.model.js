@@ -22,6 +22,7 @@ const userSchema = new mongoose.Schema(
     dob: { type: Date },
     age: { type: Number, min: 0 },
     fcmTokens: { type: [String], default: [] },
+    isOnline: { type: Boolean, default: false },
     gender: {
       type: String,
       enum: ["male", "female", "other"],

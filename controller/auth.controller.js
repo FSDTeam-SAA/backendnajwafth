@@ -337,10 +337,12 @@ export const refreshToken = catchAsync(async (req, res) => {
 
 export const logout = catchAsync(async (req, res) => {
   const user = req.user?._id;
-  const user1 = await User.findByIdAndUpdate(
+  await User.findByIdAndUpdate(
     user,
-    { refreshToken: "" },
-    { new: true }
+    req.user?.role === "driver"
+      ? { refreshToken: "", isOnline: false }
+      : { refreshToken: "" },
+    { new: true },
   );
   sendResponse(res, {
     statusCode: httpStatus.OK,
