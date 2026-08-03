@@ -13,6 +13,18 @@ const driverReqSchema = new Schema(
     phone:{
         type: String,
     },
+    shopPhone: {
+        type: String,
+    },
+    customerPhone: {
+        type: String,
+    },
+    shopLocation: {
+        type: String,
+    },
+    customerLocation: {
+        type: String,
+    },
     orderDate:{
         type: Date,
     },
@@ -32,6 +44,8 @@ const driverReqSchema = new Schema(
     orderId:{
         type: Schema.Types.ObjectId,
         ref: "Order",
+        required: true,
+        unique: true,
     },
     price:{
         type: Number,
@@ -42,6 +56,14 @@ const driverReqSchema = new Schema(
     driver:{
         type: Schema.Types.ObjectId,
         ref: "User",
+    },
+    assignedAt: {
+        type: Date,
+        default: null,
+    },
+    acceptedAt: {
+        type: Date,
+        default: null,
     },
     dismissedDrivers: [{
         type: Schema.Types.ObjectId,

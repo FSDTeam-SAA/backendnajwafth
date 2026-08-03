@@ -10,13 +10,53 @@ import {
   notifyAdmins,
   getUserDisplayName,
 } from "../utils/notification.js";
+import { activeDriverRequestStatuses } from "../utils/driverAvailability.js";
+import { reconcileDeliveredDriverRequests } from "../utils/driverRequestLifecycle.js";
 
 const getOrderLabel = (request) =>
   request.orderId?.orderId || request._id.toString();
 
-const activeDriverRequestStatuses = ["pending", "accepted"];
+const cleanupInvalidDriverRequests = async (filter = {}) => {
+  const requests = await DriverRequest.find(filter).select("_id orderId").lean();
+  if (!requests.length) return;
+
+  const invalidRequestIds = [];
+  const orderIds = [];
+
+  for (const request of requests) {
+    if (!request.orderId) {
+      invalidRequestIds.push(request._id);
+    } else {
+      orderIds.push(request.orderId);
+    }
+  }
+
+  if (orderIds.length) {
+    const existingOrders = await Order.find({ _id: { $in: orderIds } })
+      .select("_id")
+      .lean();
+    const existingOrderIds = new Set(
+      existingOrders.map((order) => order._id.toString()),
+    );
+
+    for (const request of requests) {
+      if (
+        request.orderId &&
+        !existingOrderIds.has(request.orderId.toString())
+      ) {
+        invalidRequestIds.push(request._id);
+      }
+    }
+  }
+
+  if (invalidRequestIds.length) {
+    await DriverRequest.deleteMany({ _id: { $in: invalidRequestIds } });
+  }
+};
 
 const getAvailableDriverIds = async () => {
+  await reconcileDeliveredDriverRequests();
+
   const busyDriverIds = await DriverRequest.distinct("driver", {
     driver: { $exists: true, $ne: null },
     status: { $in: activeDriverRequestStatuses },
@@ -52,27 +92,29 @@ export const createDriverRequest = catchAsync(async (req, res) => {
     message,
   } = req.body;
 
+  if (typeof orderId !== "string" || !orderId.trim()) {
+    throw new AppError(400, "Order ID is required for driver request");
+  }
+
   let resolvedOrderId;
-  if (typeof orderId === "string" && orderId.trim()) {
-    const order = await Order.findOne({
-      orderId: orderId.trim(),
-      vendor: req.user._id,
-    });
+  const order = await Order.findOne({
+    orderId: orderId.trim(),
+    vendor: req.user._id,
+  });
 
-    if (!order) {
-      throw new AppError(404, "Order not found for this seller");
-    }
+  if (!order) {
+    throw new AppError(404, "Order not found for this seller");
+  }
 
-    resolvedOrderId = order._id;
+  resolvedOrderId = order._id;
 
-    const existingRequest = await DriverRequest.findOne({
-      shopId: req.user._id,
-      orderId: resolvedOrderId,
-    });
+  const existingRequest = await DriverRequest.findOne({
+    shopId: req.user._id,
+    orderId: resolvedOrderId,
+  });
 
-    if (existingRequest) {
-      throw new AppError(400, "Driver request already exists for this order");
-    }
+  if (existingRequest) {
+    throw new AppError(400, "Driver request already exists for this order");
   }
 
   const driverRequest = await DriverRequest.create({
@@ -92,10 +134,7 @@ export const createDriverRequest = catchAsync(async (req, res) => {
   try {
     const availableDriverIds = await getAvailableDriverIds();
     if (availableDriverIds.length) {
-      const orderLabel =
-        typeof orderId === "string" && orderId.trim()
-          ? orderId.trim()
-          : driverRequest._id.toString();
+      const orderLabel = orderId.trim();
       await createNotification({
         userIds: availableDriverIds,
         actor: req.user._id,
@@ -164,6 +203,9 @@ export const getAllDriverRequests = catchAsync(async (req, res) => {
 
   const skip = (Number(page) - 1) * Number(limit);
 
+  await cleanupInvalidDriverRequests(baseFilter);
+  await reconcileDeliveredDriverRequests(baseFilter);
+
   const [requests, total, totalRequests, totalPending, totalCompleted] = await Promise.all([
     DriverRequest.find(filter)
       .populate("shopId", "name email")
@@ -216,6 +258,8 @@ export const getShopDriverRequests = catchAsync(async (req, res, next) => {
     return next(new AppError(403, "Access denied"));
   }
 
+  await cleanupInvalidDriverRequests({ shopId });
+
   const requests = await DriverRequest.find({ shopId })
     .populate("orderId")
     .sort({ createdAt: -1 });
@@ -238,6 +282,9 @@ export const getSingleDriverRequest = catchAsync(async (req, res, next) => {
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return next(new AppError(400, "Invalid request ID"));
   }
+
+  await cleanupInvalidDriverRequests({ _id: id });
+  await reconcileDeliveredDriverRequests({ _id: id });
 
   const request = await DriverRequest.findById(id)
     .populate("shopId", "name email")
@@ -293,20 +340,38 @@ export const updateDriverRequest = catchAsync(async (req, res, next) => {
       ? { _id: id, shopId: req.user._id }
       : { _id: id };
 
+  const updatePayload = {
+    shopName,
+    phone,
+    orderDate,
+    totalAmount,
+    customerName,
+    item: item || totalItems,
+    location: customerLocation || location,
+    price,
+    message,
+  };
+
+  if (orderId !== undefined) {
+    if (typeof orderId !== "string" || !orderId.trim()) {
+      return next(new AppError(400, "Order ID is required"));
+    }
+
+    const order = await Order.findOne({
+      orderId: orderId.trim(),
+      ...(req.user.role === "seller" ? { vendor: req.user._id } : {}),
+    });
+
+    if (!order) {
+      return next(new AppError(404, "Order not found"));
+    }
+
+    updatePayload.orderId = order._id;
+  }
+
   const request = await DriverRequest.findOneAndUpdate(
     filter,
-    {
-      shopName,
-      phone,
-      orderDate,
-      totalAmount,
-      customerName,
-      item: item || totalItems,
-      location: customerLocation || location,
-      orderId,
-      price,
-      message,
-    },
+    updatePayload,
     {
       new: true,
       runValidators: true,
@@ -368,10 +433,31 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
     return next(new AppError(400, "Invalid request ID or driver ID"));
   }
 
+  await cleanupInvalidDriverRequests({ _id: id });
+
   const request = await DriverRequest.findById(id);
   if (!request) {
     return next(new AppError(404, "Driver request not found"));
   }
+
+  if (request.status !== "pending") {
+    return next(
+      new AppError(409, "Only pending requests can be assigned or claimed"),
+    );
+  }
+
+  const order = await Order.findById(request.orderId).select("status").lean();
+  if (!order || order.status === "delivered") {
+    if (order?.status === "delivered") {
+      await DriverRequest.updateOne(
+        { _id: request._id },
+        { $set: { status: "completed" } },
+      );
+    }
+    return next(new AppError(409, "Delivered orders cannot be assigned"));
+  }
+
+  await reconcileDeliveredDriverRequests({ driver: driverId });
 
   if (
     req.user.role === "driver" &&
@@ -411,7 +497,7 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
           { driver: req.user._id },
         ],
       },
-      { $set: { driver: req.user._id } },
+      { $set: { driver: req.user._id, assignedAt: new Date() } },
       { new: true, runValidators: true },
     );
     if (!claimed) {
@@ -421,10 +507,9 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
     const driver = await User.findOne({
       _id: driverId,
       role: "driver",
-      isOnline: true,
     });
     if (!driver) {
-      return next(new AppError(409, "Only online drivers can be assigned"));
+      return next(new AppError(404, "Driver not found"));
     }
 
     const existingWork = await DriverRequest.exists({
@@ -437,13 +522,8 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
     }
 
     request.driver = driverId;
+    request.assignedAt = new Date();
     await request.save();
-
-    if (request.status === "accepted" && request.orderId) {
-      await Order.findByIdAndUpdate(request.orderId, {
-        $set: { driver: driverId },
-      });
-    }
   }
 
   const updatedRequest = await DriverRequest.findById(request._id)
@@ -452,6 +532,23 @@ export const assignDriverToRequest = catchAsync(async (req, res, next) => {
 
   if (req.user.role === "admin" && previousDriverId !== driverId.toString()) {
     try {
+      if (previousDriverId) {
+        await createNotification({
+          user: previousDriverId,
+          actor: req.user._id,
+          order: updatedRequest.orderId?._id || null,
+          type: "driver_request_unassigned",
+          title: "Delivery request reassigned",
+          message: `The delivery request for order ${getOrderLabel(
+            updatedRequest,
+          )} was reassigned to another driver.`,
+          metadata: {
+            driverRequestId: updatedRequest._id.toString(),
+            orderId: getOrderLabel(updatedRequest),
+          },
+        });
+      }
+
       await createNotification({
         user: driverId,
         actor: req.user._id,
@@ -489,6 +586,10 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
   if (!["pending", "accepted", "rejected", "completed"].includes(status)) {
     return next(new AppError(400, "Invalid status value"));
   }
+
+  await cleanupInvalidDriverRequests({ _id: id });
+  await reconcileDeliveredDriverRequests({ _id: id });
+
   const request = await DriverRequest.findById(id);
   if (!request) {
     return next(new AppError(404, "Driver request not found"));
@@ -496,6 +597,10 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
 
   if (req.user.role !== "admin" && req.user.role !== "driver") {
     return next(new AppError(403, "Only admin or driver can update status"));
+  }
+
+  if (req.user.role === "admin" && status === "accepted") {
+    return next(new AppError(403, "Only the assigned driver can accept a request"));
   }
 
   if (req.user.role === "driver") {
@@ -530,7 +635,7 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
       await DriverRequest.findByIdAndUpdate(id, {
         $addToSet: { dismissedDrivers: req.user._id },
         $unset: { driver: 1 },
-        $set: { status: "pending" },
+        $set: { status: "pending", assignedAt: null, acceptedAt: null },
       });
 
       const updatedRequest = await DriverRequest.findById(id)
@@ -584,6 +689,17 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
         return next(new AppError(409, "Go online before accepting requests"));
       }
 
+      const order = await Order.findById(request.orderId).select("status").lean();
+      if (!order || order.status === "delivered") {
+        if (order?.status === "delivered") {
+          request.status = "completed";
+          await request.save();
+        }
+        return next(new AppError(409, "This order has already been delivered"));
+      }
+
+      await reconcileDeliveredDriverRequests({ driver: req.user._id });
+
       const existingWork = await DriverRequest.exists({
         _id: { $ne: request._id },
         driver: req.user._id,
@@ -603,7 +719,14 @@ export const updateDriverRequestStatus = catchAsync(async (req, res, next) => {
             { driver: req.user._id },
           ],
         },
-        { $set: { driver: req.user._id, status: "accepted" } },
+        {
+          $set: {
+            driver: req.user._id,
+            status: "accepted",
+            assignedAt: request.assignedAt || new Date(),
+            acceptedAt: new Date(),
+          },
+        },
         { new: true, runValidators: true },
       );
 
@@ -668,6 +791,10 @@ export const getDriverRequestsByDriver = catchAsync(async (req, res, next) => {
   if (!mongoose.Types.ObjectId.isValid(driverId)) {
     return next(new AppError(400, "Invalid driver ID"));
   }
+
+  await cleanupInvalidDriverRequests({ driver: driverId });
+  await reconcileDeliveredDriverRequests({ driver: driverId });
+
   const requests = await DriverRequest.find({ driver: driverId })
     .populate("shopId", "name email")
     .populate("orderId")

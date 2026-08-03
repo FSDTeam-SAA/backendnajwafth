@@ -9,7 +9,13 @@ import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 import { Review } from "../model/review.model.js";
 import { Notification } from "../model/notification.model.js";
-import { getDriverAvailability } from "../utils/driverAvailability.js";
+import {
+  activeDriverRequestStatuses,
+  getDriverAvailability,
+  getDriverOnlineStatus,
+  getDriverRideStatus,
+} from "../utils/driverAvailability.js";
+import { reconcileDeliveredDriverRequests } from "../utils/driverRequestLifecycle.js";
 
 // Get user profile
 export const getProfile = catchAsync(async (req, res) => {
@@ -246,6 +252,8 @@ export const getSellerCustomers = catchAsync(async (req, res) => {
 });
 
 export const getAdminDrivers = catchAsync(async (_req, res) => {
+  await reconcileDeliveredDriverRequests();
+
   const drivers = await User.find({ role: "driver" })
     .select("-password -refreshToken -verificationInfo -password_reset_token")
     .sort({ createdAt: -1 });
@@ -257,7 +265,7 @@ export const getAdminDrivers = catchAsync(async (_req, res) => {
       {
         $match: {
           driver: { $in: driverIds },
-          status: { $in: ["pending", "accepted"] },
+          status: { $in: activeDriverRequestStatuses },
         },
       },
       {
@@ -300,6 +308,8 @@ export const getAdminDrivers = catchAsync(async (_req, res) => {
         isOnline: driver.isOnline,
         currentOrders,
       }),
+      rideStatus: getDriverRideStatus({ currentOrders }),
+      onlineStatus: getDriverOnlineStatus({ isOnline: driver.isOnline }),
       currentOrders,
       completedDeliveries: completedMap.get(key) || 0,
     };

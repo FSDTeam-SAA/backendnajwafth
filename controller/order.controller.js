@@ -11,6 +11,7 @@ import { Book } from "../model/book.model.js";
 import { createNotification, getUserDisplayName } from "../utils/notification.js";
 import { getAdminCommissionRate, getDeliveryFee } from "../utils/adminSettings.js";
 import { DriverRequest } from "../model/driveReq.model.js";
+import { ensureDriverRequestForOrder } from "../utils/driverRequestOffer.js";
 
 const formatOrderStatus = (status = "") => status.replace(/_/g, " ");
 
@@ -132,6 +133,8 @@ export const createOrder = catchAsync(async (req, res) => {
     addressDetails,
     expectedDeliveryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
+
+  await ensureDriverRequestForOrder(order);
 
   await Promise.all([
     createNotification({

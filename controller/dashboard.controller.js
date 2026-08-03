@@ -9,6 +9,13 @@ import { User } from "../model/user.model.js";
 import catchAsync from "../utils/catchAsync.js";
 import sendResponse from "../utils/sendResponse.js";
 import { getAdminCommissionRate } from "../utils/adminSettings.js";
+import {
+  getDriverAvailability,
+  getDriverOnlineStatus,
+  getDriverRideStatus,
+  isDriverRequestActive,
+} from "../utils/driverAvailability.js";
+import { reconcileDeliveredDriverRequests } from "../utils/driverRequestLifecycle.js";
 
 const buildMonthlyDeliveryActivity = (orders = []) => {
   const labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -135,13 +142,15 @@ export const getSellerOverview = catchAsync(async (req, res) => {
 });
 
 export const getAdminOverview = catchAsync(async (_req, res) => {
+  await reconcileDeliveredDriverRequests();
+
   const [recentSellerUsers, totalBookstores, drivers, driverRequests, completedOrders, recentOrders, recentDriverRequests] = await Promise.all([
     User.find({ role: "seller" }).sort({ createdAt: -1 }).limit(8).select("name email phone avatar address username"),
     User.countDocuments({ role: "seller" }),
-    User.find({ role: "driver" }).sort({ createdAt: -1 }).limit(8).select("name email phone avatar createdAt"),
+    User.find({ role: "driver" }).sort({ createdAt: -1 }).limit(8).select("name email phone avatar isOnline createdAt"),
     DriverRequest.find()
       .populate("shopId", "name email phone")
-      .populate("driver", "name email phone")
+      .populate("driver", "name email phone avatar")
       .populate("orderId")
       .sort({ createdAt: -1 }),
     Order.find({ status: "delivered" }).sort({ createdAt: -1 }),
@@ -152,7 +161,7 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
       .limit(8),
     DriverRequest.find()
       .populate("shopId", "name email phone")
-      .populate("driver", "name email phone")
+      .populate("driver", "name email phone avatar")
       .sort({ createdAt: -1 })
       .limit(8),
   ]);
@@ -173,6 +182,34 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
     };
   });
 
+  const activeAssignmentsByDriver = new Map();
+  for (const request of driverRequests) {
+    if (
+      request.driver?._id &&
+      isDriverRequestActive(request.status)
+    ) {
+      const driverId = request.driver._id.toString();
+      activeAssignmentsByDriver.set(
+        driverId,
+        (activeAssignmentsByDriver.get(driverId) || 0) + 1,
+      );
+    }
+  }
+
+  const recentDrivers = drivers.map((driver) => {
+    const currentOrders = activeAssignmentsByDriver.get(driver._id.toString()) || 0;
+    return {
+      ...driver.toObject(),
+      status: getDriverAvailability({
+        isOnline: driver.isOnline,
+        currentOrders,
+      }),
+      rideStatus: getDriverRideStatus({ currentOrders }),
+      onlineStatus: getDriverOnlineStatus({ isOnline: driver.isOnline }),
+      currentOrders,
+    };
+  });
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -188,7 +225,7 @@ export const getAdminOverview = catchAsync(async (_req, res) => {
       recentOrders,
       recentDriverRequests,
       recentShops,
-      recentDrivers: drivers,
+      recentDrivers,
     },
   });
 });
