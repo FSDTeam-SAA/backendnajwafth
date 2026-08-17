@@ -7,8 +7,8 @@ import upload from "../middleware/multer.middleware.js";
 const router = express.Router();
 
 router.post("/add", protect, isSeller, upload.single("coverImage"), createBook);
-router.get("/", protect, getAllBooks); 
-router.get("/:id", protect, getSingleBook); 
+router.get("/", getAllBooks); 
+router.get("/:id", getSingleBook); 
 router.put("/:id", protect, isSeller, upload.single("coverImage"), updateBook);
 router.patch("/:id", protect, isSeller, upload.single("coverImage"), updateBook);
 router.delete("/:id", protect, isSeller, deleteBook);
