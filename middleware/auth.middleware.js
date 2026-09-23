@@ -23,6 +23,13 @@ export const protect = catchAsync(async (req, res, next) => {
     throw new AppError(httpStatus.UNAUTHORIZED, "User not found");
   }
 
+  if (user.deletedAt) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "This account has been deleted or deactivated.",
+    );
+  }
+
   if (user.isBlocked) {
     throw new AppError(httpStatus.FORBIDDEN, "User is blocked");
   }
