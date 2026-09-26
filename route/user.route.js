@@ -30,6 +30,7 @@ router.patch(
   updateDriverAvailability,
 );
 router.delete("/me", protect, deleteOwnAccount);
+router.delete("/account", protect, deleteOwnAccount);
 router.patch("/change-password", protect, changePassword);
 router.get("/seller/customers", protect, isSeller, getSellerCustomers);
 router.get("/drivers", protect, isAdmin, getAdminDrivers);

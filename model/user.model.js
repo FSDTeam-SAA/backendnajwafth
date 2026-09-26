@@ -79,6 +79,7 @@ const userSchema = new mongoose.Schema(
     password_reset_token: { type: String, default: "" },
     fine: { type: Number, default: 0 },
     refreshToken: { type: String, default: "" },
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

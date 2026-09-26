@@ -1,4 +1,5 @@
 import express from "express";
+import { getPublicShops } from "../controller/publicShop.controller.js";
 import {
   getShops,
   getMyShop,
@@ -12,6 +13,7 @@ import upload from "../middleware/multer.middleware.js";
 
 const router = express.Router();
 
+router.get("/public", getPublicShops);
 router.use(protect);
 
 router.get("/", isAdmin, getShops);

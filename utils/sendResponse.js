@@ -7,6 +7,9 @@ const sendResponse = (res, data) => {
 
   if (typeof data?.meta !== "undefined") payload.meta = data.meta;
   if (typeof data?.results !== "undefined") payload.results = data.results;
+  if (typeof data?.pagination !== "undefined") {
+    payload.pagination = data.pagination;
+  }
 
   res.status(data?.statusCode).json(payload);
 };

@@ -204,7 +204,9 @@ export const getCategoryTree = catchAsync(async (req, res) => {
         });
         const associatedProducts = await Book.find({
           category: category._id,
-        }).populate("category", "name path").populate("vendor", "name").populate("shopId", "name description shopStatus");
+        })
+          .populate("category", "name path")
+          .populate("shopId", "name description shopStatus");
 
         return {
           _id: category._id,

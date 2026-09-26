@@ -8,6 +8,15 @@ import { sendEmail } from "../utils/sendEmail.js";
 import { User } from "./../model/user.model.js";
 import { getFirebaseAuth } from "../utils/firebaseAdmin.js";
 
+const assertAccountActive = (user) => {
+  if (user?.deletedAt) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "This account has been deleted or deactivated.",
+    );
+  }
+};
+
 const buildAuthResponseData = (user, accessToken, refreshToken) => {
   const userObj = user.toObject();
 
@@ -24,8 +33,20 @@ const buildAuthResponseData = (user, accessToken, refreshToken) => {
   };
 };
 
+export const resolvePublicRegistrationRole = (role) => {
+  const registrationRole = role || "buyer";
+  if (!["buyer", "seller"].includes(registrationRole)) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      "Public registration is only available for buyer or seller accounts",
+    );
+  }
+  return registrationRole;
+};
+
 export const register = catchAsync(async (req, res) => {
   const { name, email, phone, password, confirmPassword, role } = req.body;
+  const registrationRole = resolvePublicRegistrationRole(role);
 
   if (!name || !email || !password) {
     throw new AppError(httpStatus.FORBIDDEN, "Please fill in all fields");
@@ -50,7 +71,7 @@ export const register = catchAsync(async (req, res) => {
     email,
     phone,
     password,
-    role,
+    role: registrationRole,
     verificationInfo: { token: "", verified: true },
   });
 
@@ -87,6 +108,7 @@ export const login = catchAsync(async (req, res) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
+  assertAccountActive(user);
   if (
     user?.password &&
     !(await User.isPasswordMatched(password, user.password))
@@ -193,6 +215,8 @@ export const socialLogin = catchAsync(async (req, res) => {
     ],
   });
 
+  assertAccountActive(user);
+
   if (user && user.role !== "buyer") {
     throw new AppError(
       httpStatus.FORBIDDEN,
@@ -260,6 +284,7 @@ export const forgetPassword = catchAsync(async (req, res) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
+  assertAccountActive(user);
   const otp = generateOTP();
   const jwtPayloadOTP = {
     otp: otp,
@@ -290,6 +315,7 @@ export const verifyOTPForReset = catchAsync(async (req, res) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
+  assertAccountActive(user);
   if (!user.password_reset_token) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
@@ -317,6 +343,7 @@ export const resetPassword = catchAsync(async (req, res) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
+  assertAccountActive(user);
   if (!user.password_reset_token) {
     throw new AppError(
       httpStatus.BAD_REQUEST,
@@ -347,6 +374,7 @@ export const verifyEmail = catchAsync(async (req, res) => {
   if (!user) {
     throw new AppError(httpStatus.NOT_FOUND, "User not found");
   }
+  assertAccountActive(user);
   if (otp) {
     const savedOTP = verifyToken(
       user.verificationInfo.token,
@@ -412,6 +440,7 @@ export const refreshToken = catchAsync(async (req, res) => {
   if (!user || user.refreshToken !== refreshToken) {
     throw new AppError(401, "Invalid refresh token");
   }
+  assertAccountActive(user);
   const jwtPayload = {
     _id: user._id,
     email: user.email,

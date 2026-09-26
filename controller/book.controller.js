@@ -99,7 +99,10 @@ export const getAllBooks = catchAsync(async (req, res) => {
     // shopId: req.user._id,
   };
 
-  if (shopId && mongoose.Types.ObjectId.isValid(shopId)) {
+  if (shopId !== undefined) {
+    if (!mongoose.Types.ObjectId.isValid(shopId)) {
+      throw new AppError(400, "Invalid bookstore ID");
+    }
     filter.shopId = shopId;
   } else if (req.user?.role === "seller") {
     filter.shopId = req.user._id;
