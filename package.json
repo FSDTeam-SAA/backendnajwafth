@@ -28,7 +28,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.4",
     "multer": "^2.1.0",
-    "nanoid": "^5.1.6",
+    "nanoid": "^5.1.16",
     "nodemailer": "^8.0.1",
     "password-validator": "^5.3.0",
     "path": "^0.12.7",
