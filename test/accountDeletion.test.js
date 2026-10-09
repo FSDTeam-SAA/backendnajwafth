@@ -7,6 +7,13 @@ import { login } from "../controller/auth.controller.js";
 import { deleteOwnAccount } from "../controller/user.controller.js";
 import { protect } from "../middleware/auth.middleware.js";
 import { User } from "../model/user.model.js";
+import { Order } from "../model/order.model.js";
+import { DriverRequest } from "../model/driveReq.model.js";
+import { Cart } from "../model/cart.model.js";
+import { Wishlist } from "../model/wishlist.model.js";
+import { Notification } from "../model/notification.model.js";
+import { Review } from "../model/review.model.js";
+import { paymentInfo } from "../model/payment.model.js";
 
 function invoke(handler, req, res = {}) {
   return new Promise((resolve, reject) => {
@@ -21,15 +28,44 @@ test("new users are active by default", () => {
   assert.equal(user.deletedAt, null);
 });
 
-test("account deletion retains the user and revokes session data", async () => {
-  const original = User.findOneAndUpdate;
-  let capturedFilter;
-  let capturedUpdate;
-  User.findOneAndUpdate = async (filter, update) => {
-    capturedFilter = filter;
-    capturedUpdate = update;
-    return { _id: filter._id };
+test("account deletion removes personal data and anonymizes retained orders", async () => {
+  const originals = {
+    findOne: User.findOne,
+    deleteUser: User.deleteOne,
+    distinctOrders: Order.distinct,
+    updateOrders: Order.updateMany,
+    updateDriverRequests: DriverRequest.updateMany,
+    deleteCarts: Cart.deleteMany,
+    deleteWishlists: Wishlist.deleteMany,
+    deleteReviews: Review.deleteMany,
+    deleteNotifications: Notification.deleteMany,
+    updateNotifications: Notification.updateMany,
+    updatePayments: paymentInfo.updateMany,
   };
+  const calls = [];
+  User.findOne = async (filter) => {
+    calls.push(["find-user", filter]);
+    return { _id: filter._id, role: "buyer", avatar: {} };
+  };
+  User.deleteOne = async (filter) => calls.push(["delete-user", filter]);
+  Order.distinct = async (_field, filter) => {
+    calls.push(["find-orders", filter]);
+    return [new mongoose.Types.ObjectId()];
+  };
+  Order.updateMany = async (filter, update) =>
+    calls.push(["update-orders", filter, update]);
+  DriverRequest.updateMany = async (filter, update) =>
+    calls.push(["update-driver-requests", filter, update]);
+  Cart.deleteMany = async (filter) => calls.push(["delete-carts", filter]);
+  Wishlist.deleteMany = async (filter) =>
+    calls.push(["delete-wishlists", filter]);
+  Review.deleteMany = async (filter) => calls.push(["delete-reviews", filter]);
+  Notification.deleteMany = async (filter) =>
+    calls.push(["delete-notifications", filter]);
+  Notification.updateMany = async (filter, update) =>
+    calls.push(["update-notifications", filter, update]);
+  paymentInfo.updateMany = async (filter, update) =>
+    calls.push(["update-payments", filter, update]);
 
   let clearedCookie;
   const res = {
@@ -53,14 +89,34 @@ test("account deletion retains the user and revokes session data", async () => {
       );
     });
 
-    assert.deepEqual(capturedFilter, { _id: userId, deletedAt: null });
-    assert.ok(capturedUpdate.$set.deletedAt instanceof Date);
-    assert.equal(capturedUpdate.$set.refreshToken, "");
-    assert.deepEqual(capturedUpdate.$set.fcmTokens, []);
+    const orderCleanup = calls.find(([name]) => name === "update-orders");
+    assert.deepEqual(orderCleanup[1], { customer: userId });
+    assert.deepEqual(Object.keys(orderCleanup[2].$unset).sort(), [
+      "address",
+      "addressDetails",
+      "customer",
+      "phone",
+      "recipientName",
+    ]);
+    assert.ok(calls.some(([name]) => name === "delete-carts"));
+    assert.ok(calls.some(([name]) => name === "delete-wishlists"));
+    assert.ok(calls.some(([name]) => name === "delete-reviews"));
+    assert.ok(calls.some(([name]) => name === "update-payments"));
+    assert.ok(calls.some(([name]) => name === "delete-user"));
     assert.equal(clearedCookie, "refreshToken");
     assert.equal(payload.success, true);
   } finally {
-    User.findOneAndUpdate = original;
+    User.findOne = originals.findOne;
+    User.deleteOne = originals.deleteUser;
+    Order.distinct = originals.distinctOrders;
+    Order.updateMany = originals.updateOrders;
+    DriverRequest.updateMany = originals.updateDriverRequests;
+    Cart.deleteMany = originals.deleteCarts;
+    Wishlist.deleteMany = originals.deleteWishlists;
+    Review.deleteMany = originals.deleteReviews;
+    Notification.deleteMany = originals.deleteNotifications;
+    Notification.updateMany = originals.updateNotifications;
+    paymentInfo.updateMany = originals.updatePayments;
   }
 });
 

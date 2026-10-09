@@ -2,12 +2,20 @@ import httpStatus from "http-status";
 import { User } from "../model/user.model.js";
 import { Order } from "../model/order.model.js";
 import { DriverRequest } from "../model/driveReq.model.js";
-import { uploadOnCloudinary } from "../utils/commonMethod.js";
+import {
+  deleteFromCloudinary,
+  uploadOnCloudinary,
+} from "../utils/commonMethod.js";
 import AppError from "../errors/AppError.js";
 import sendResponse from "../utils/sendResponse.js";
 import catchAsync from "../utils/catchAsync.js";
 import { Book } from "../model/book.model.js";
 import { Review } from "../model/review.model.js";
+import { Cart } from "../model/cart.model.js";
+import { Wishlist } from "../model/wishlist.model.js";
+import { Notification } from "../model/notification.model.js";
+import { paymentInfo } from "../model/payment.model.js";
+import { getFirebaseAuth } from "../utils/firebaseAdmin.js";
 import {
   activeDriverRequestStatuses,
   getDriverAvailability,
@@ -333,22 +341,120 @@ export const deleteOwnAccount = catchAsync(async (req, res) => {
     );
   }
 
-  const user = await User.findOneAndUpdate(
-    { _id: userId, deletedAt: null },
-    {
-      $set: {
-        deletedAt: new Date(),
-        refreshToken: "",
-        password_reset_token: "",
-        fcmTokens: [],
-        isOnline: false,
-      },
-    },
-    { new: true },
-  );
+  const user = await User.findOne({ _id: userId, deletedAt: null });
   if (!user) {
-    throw new AppError(httpStatus.FORBIDDEN, "Account is already deactivated");
+    throw new AppError(httpStatus.NOT_FOUND, "Account not found");
   }
+
+  // Remove externally stored identity data before deleting the local record.
+  // If either provider is unavailable, leave the account intact so the user can
+  // retry rather than reporting a deletion that was only partly completed.
+  if (user.avatar?.public_id) {
+    try {
+      await deleteFromCloudinary(user.avatar.public_id);
+    } catch (error) {
+      console.error("[account-deletion] Failed to delete avatar:", error);
+      throw new AppError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        "Account deletion is temporarily unavailable. Please try again.",
+      );
+    }
+  }
+
+  if (user.firebaseUid) {
+    const firebaseAuth = getFirebaseAuth();
+    if (!firebaseAuth) {
+      throw new AppError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        "Account deletion is temporarily unavailable. Please try again.",
+      );
+    }
+
+    try {
+      await firebaseAuth.deleteUser(user.firebaseUid);
+    } catch (error) {
+      if (error?.code !== "auth/user-not-found") {
+        console.error(
+          "[account-deletion] Failed to delete Firebase identity:",
+          error,
+        );
+        throw new AppError(
+          httpStatus.SERVICE_UNAVAILABLE,
+          "Account deletion is temporarily unavailable. Please try again.",
+        );
+      }
+    }
+  }
+
+  const buyerOrderIds = role === "buyer"
+    ? await Order.distinct("_id", { customer: userId })
+    : [];
+
+  const cleanupTasks = [
+    Cart.deleteMany({ user: userId }),
+    Wishlist.deleteMany({ user: userId }),
+    Review.deleteMany({ user: userId }),
+    Notification.deleteMany({ user: userId }),
+    Notification.updateMany({ actor: userId }, { $set: { actor: null } }),
+    paymentInfo.updateMany(
+      { userId },
+      {
+        $unset: {
+          userId: "",
+          paymentMethodNonce: "",
+        },
+      },
+    ),
+  ];
+
+  if (role === "buyer") {
+    cleanupTasks.push(
+      Order.updateMany(
+        { customer: userId },
+        {
+          $unset: {
+            customer: "",
+            address: "",
+            recipientName: "",
+            phone: "",
+            addressDetails: "",
+          },
+        },
+      ),
+      DriverRequest.updateMany(
+        { orderId: { $in: buyerOrderIds } },
+        {
+          $unset: {
+            customerPhone: "",
+            customerName: "",
+            customerLocation: "",
+            location: "",
+          },
+        },
+      ),
+    );
+  } else {
+    cleanupTasks.push(
+      Order.updateMany({ driver: userId }, { $unset: { driver: "" } }),
+      DriverRequest.updateMany(
+        { driver: userId },
+        {
+          $unset: {
+            driver: "",
+            assignedAt: "",
+            acceptedAt: "",
+          },
+        },
+      ),
+      DriverRequest.updateMany(
+        { dismissedDrivers: userId },
+        { $pull: { dismissedDrivers: userId } },
+      ),
+    );
+  }
+
+  await Promise.all(cleanupTasks);
+  await User.deleteOne({ _id: userId });
 
   res.clearCookie("refreshToken", {
     secure: true,

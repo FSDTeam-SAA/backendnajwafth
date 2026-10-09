@@ -40,13 +40,20 @@ const globalErrorHandler = (err, req, res, next) => {
     ];
   }
 
-  return res.status(statusCode).json({
+  const payload = {
     success: false,
     message,
     errorSources,
-    err,
-    stack: err?.stack || null,
-  });
+  };
+
+  // Never expose implementation details or filesystem paths to production
+  // clients. Detailed errors remain available in server logs.
+  if (process.env.NODE_ENV === "development") {
+    payload.err = err;
+    payload.stack = err?.stack || null;
+  }
+
+  return res.status(statusCode).json(payload);
 };
 
 export default globalErrorHandler;

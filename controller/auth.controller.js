@@ -44,9 +44,8 @@ export const resolvePublicRegistrationRole = (role) => {
   return registrationRole;
 };
 
-export const register = catchAsync(async (req, res) => {
-  const { name, email, phone, password, confirmPassword, role } = req.body;
-  const registrationRole = resolvePublicRegistrationRole(role);
+const registerAccount = async (req, res, registrationRole) => {
+  const { name, email, phone, password, confirmPassword } = req.body;
 
   if (!name || !email || !password) {
     throw new AppError(httpStatus.FORBIDDEN, "Please fill in all fields");
@@ -100,6 +99,14 @@ export const register = catchAsync(async (req, res) => {
     message: "User registered successfully",
     data: buildAuthResponseData(user, accessToken, refreshToken),
   });
+};
+
+export const register = catchAsync(async (req, res) => {
+  return registerAccount(req, res, resolvePublicRegistrationRole(req.body.role));
+});
+
+export const registerDriver = catchAsync(async (req, res) => {
+  return registerAccount(req, res, "driver");
 });
 
 export const login = catchAsync(async (req, res) => {

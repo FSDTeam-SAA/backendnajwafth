@@ -1,6 +1,7 @@
 import express from "express";
 import {
   register,
+  registerDriver,
   login,
   forgetPassword,
   // verifyOTP,
@@ -16,6 +17,10 @@ const router = express.Router();
 
 // Sign up
 router.post("/register", register);
+
+// The driver app registers through its own endpoint; buyer/seller registration
+// keeps the existing role restrictions.
+router.post("/driver-register", registerDriver);
 
 // Sign in
 router.post("/login", login);
