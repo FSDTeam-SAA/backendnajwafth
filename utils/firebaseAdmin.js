@@ -3,6 +3,7 @@ import { getAuth as getFirebaseAuthForApp } from "firebase-admin/auth";
 import { getMessaging as getFirebaseMessaging } from "firebase-admin/messaging";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 /**
  * Firebase Admin initialisation for sending FCM push notifications.
@@ -29,9 +30,13 @@ const loadServiceAccount = () => {
     }
   }
 
+  // Also look in the project root (next to server.js), so the key is found
+  // even when the process manager starts the app from another directory.
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const candidatePaths = [
     process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
     path.resolve(process.cwd(), "serviceAccountKey.json"),
+    path.resolve(projectRoot, "serviceAccountKey.json"),
   ].filter(Boolean);
 
   for (const filePath of candidatePaths) {
